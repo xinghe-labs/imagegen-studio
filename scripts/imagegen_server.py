@@ -507,11 +507,13 @@ def create_app(
         return candidate
 
     @app.get("/api/image")
-    async def image(path: str) -> FileResponse:
+    async def image(path: str, download: bool = False) -> FileResponse:
         image_path = confine(path)
         if not image_path.is_file():
             raise HTTPException(404, "图片不存在")
         media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+        if download:
+            return FileResponse(image_path, media_type=media.get(image_path.suffix.lower(), "application/octet-stream"), filename=image_path.name)
         return FileResponse(image_path, media_type=media.get(image_path.suffix.lower(), "application/octet-stream"))
 
     @app.post("/api/rate")

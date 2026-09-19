@@ -152,12 +152,16 @@ function collectForm() {
   const payload = { prompt: $("prompt").value.trim(), n: Number($("n").value) };
   if (!payload.prompt) throw new Error("先写一句提示词");
   if ($("model").value) payload.model = $("model").value;
-  if ($("preset").value) payload.preset = $("preset").value;
+  const preset = presetChipValue();
+  if (preset) payload.preset = preset;
+  const ratio = document.querySelector("#ratio .on");
+  if (ratio && ratio.dataset.ratio) {
+    if (($("model").value || "").startsWith("grok")) payload.aspect_ratio = ratio.dataset.ratio;
+    else payload.size = { "1:1": "1024x1024", "3:2": "1536x1024", "2:3": "1024x1536" }[ratio.dataset.ratio];
+  }
   if ($("size").value.trim()) payload.size = $("size").value.trim();
   if ($("quality").value.trim()) payload.quality = $("quality").value.trim();
   if ($("format").value.trim()) payload.format = $("format").value.trim();
-  const preset = presetChipValue();
-  if (preset) payload.preset = preset;
   if ($("character").value) payload.character = $("character").value;
   if ($("project").value.trim()) payload.project = $("project").value.trim();
   const profile = $("profile-select").value;
@@ -326,13 +330,73 @@ function renderGallery() {
     return `
     <figure class="card"${ratio} data-index="${i}">
       <img src="/api/image?path=${encodeURIComponent(r.image)}" alt="" loading="lazy">
+      <div class="quick-bar">
+        <button type="button" data-quick="download" title="下载">⤓</button>
+        <button type="button" data-quick="variant" title="以此发起变体">变</button>
+        <button type="button" data-quick="reference" title="用作参考">参</button>
+        <button type="button" data-quick="fav" title="收藏">${r.rating ? "★" : "☆"}</button>
+      </div>
       ${r.rating ? `<span class="star-badge">★${r.rating}</span>` : ""}
       <figcaption>${esc((r.prompt || "").slice(0, 70))}</figcaption>
     </figure>`;
   }).join("");
-  for (const card of grid.querySelectorAll(".card")) {
-    card.addEventListener("click", () => openDetail(RECORDS[Number(card.dataset.index)]));
-  }
+  grid.onclick = (e) => {
+    const quick = e.target.closest("[data-quick]");
+    const cardEl = e.target.closest(".card");
+    if (!cardEl) return;
+    const record = RECORDS[Number(cardEl.dataset.index)];
+    if (!record) return;
+    if (quick) {
+      e.stopPropagation();
+      const act = quick.dataset.quick;
+      if (act === "download") downloadImage(record);
+      else if (act === "variant") variantFrom(record);
+      else if (act === "reference") referenceFrom(record);
+      else if (act === "fav") toggleFavorite(record);
+      return;
+    }
+    openDetail(record);
+  };
+}
+
+function downloadImage(record) {
+  const a = document.createElement("a");
+  a.href = `/api/image?path=${encodeURIComponent(record.image)}&download=1`;
+  a.download = record.image.split(/[\\/]/).pop();
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
+function variantFrom(record) {
+  setMode("t2i");
+  $("prompt").value = record.prompt || "";
+  if (record.model) $("model").value = record.model;
+  const params = record.parameters || {};
+  setPresetChip(params.preset || "");
+  $("size").value = params.size || "";
+  $("quality").value = params.quality || "";
+  closeDetail();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function referenceFrom(record) {
+  if (!REF_PATHS.includes(record.image)) REF_PATHS.push(record.image);
+  setMode("i2i");
+  renderRefs();
+  closeDetail();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function toggleFavorite(record) {
+  const next = record.rating ? 0 : 5;
+  await api("/api/rate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image: record.image, rating: next }),
+  });
+  record.rating = next;
+  renderGallery();
 }
 
 /* ---------- detail drawer ---------- */
@@ -495,24 +559,18 @@ async function init() {
     });
   });
   $("use-as-variant").addEventListener("click", () => {
-    if (!CURRENT) return;
-    setMode("t2i");
-    $("prompt").value = CURRENT.prompt || "";
-    if (CURRENT.model) $("model").value = CURRENT.model;
-    const params = CURRENT.parameters || {};
-    setPresetChip(params.preset || "");
-    $("size").value = params.size || "";
-    $("quality").value = params.quality || "";
-    closeDetail();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (CURRENT) variantFrom(CURRENT);
   });
   $("use-as-reference").addEventListener("click", () => {
-    if (!CURRENT) return;
-    if (!REF_PATHS.includes(CURRENT.image)) REF_PATHS.push(CURRENT.image);
-    setMode("i2i");
-    renderRefs();
-    closeDetail();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (CURRENT) referenceFrom(CURRENT);
+  });
+  $("download-img").addEventListener("click", () => {
+    if (CURRENT) downloadImage(CURRENT);
+  });
+  $("ratio").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-ratio]");
+    if (!btn) return;
+    for (const b of document.querySelectorAll("#ratio button")) b.classList.toggle("on", b === btn);
   });
   $("save-as-character").addEventListener("click", async () => {
     if (!CURRENT) return;

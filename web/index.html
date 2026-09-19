@@ -58,6 +58,15 @@
       </div>
     </div>
     <span class="gen-group-label">归类</span>
+    <div class="field">
+      <span class="field-label">比例</span>
+      <div class="ratio-group" id="ratio">
+        <button type="button" data-ratio="" class="on">自动</button>
+        <button type="button" data-ratio="1:1" title="1024x1024"><span class="rect sq"></span>1:1</button>
+        <button type="button" data-ratio="3:2" title="1536x1024"><span class="rect wide"></span>3:2 横</button>
+        <button type="button" data-ratio="2:3" title="1024x1536"><span class="rect tall"></span>2:3 竖</button>
+      </div>
+    </div>
     <div class="field-row">
       <label class="field">角色<select id="character"><option value="">不使用角色档案</option></select></label>
       <label class="field">项目<input id="project" placeholder="归类用途，如：继承人封面"></label>
@@ -131,6 +140,7 @@
       <button id="save-project" type="button" class="btn-small">保存归类</button>
     </div>
     <div class="detail-actions">
+      <button id="download-img" type="button">下载</button>
       <button id="copy-cmd" type="button">复制复现命令</button>
       <button id="open-folder" type="button">打开文件夹</button>
       <button id="use-as-variant" type="button">以此发起变体</button>
