@@ -123,12 +123,29 @@ async function submitEdit() {
   form.append("prompt", prompt);
   profileField(form);
   form.append("model", $("model").value || "gpt-image-2");
-  if ($("preset").value) form.append("preset", $("preset").value);
+  const preset = presetChipValue();
+  if (preset) form.append("preset", preset);
   form.append("n", $("n").value);
   for (const p of REF_PATHS) form.append("image_paths", p);
   for (const f of REF_FILES) form.append("images", f, f.name);
   const { job_id } = await api("/api/edit", { method: "POST", body: form });
   return job_id;
+}
+
+function presetChipValue() {
+  const on = document.querySelector("#preset .on");
+  return on ? on.dataset.v : "";
+}
+
+function setPresetChip(value) {
+  for (const chip of document.querySelectorAll("#preset button")) {
+    chip.classList.toggle("on", chip.dataset.v === value);
+  }
+}
+
+function closeDetail() {
+  $("detail").classList.add("hidden");
+  $("detail-backdrop").classList.add("hidden");
 }
 
 function collectForm() {
@@ -139,6 +156,8 @@ function collectForm() {
   if ($("size").value.trim()) payload.size = $("size").value.trim();
   if ($("quality").value.trim()) payload.quality = $("quality").value.trim();
   if ($("format").value.trim()) payload.format = $("format").value.trim();
+  const preset = presetChipValue();
+  if (preset) payload.preset = preset;
   if ($("character").value) payload.character = $("character").value;
   if ($("project").value.trim()) payload.project = $("project").value.trim();
   const profile = $("profile-select").value;
@@ -331,6 +350,7 @@ function openDetail(record) {
     .map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("");
   $("detail-project").value = record.project || "";
   $("detail").classList.remove("hidden");
+  $("detail-backdrop").classList.remove("hidden");
 }
 
 async function onRate(star) {
@@ -436,7 +456,11 @@ async function init() {
   $("filter-model").addEventListener("change", loadHistory);
   $("filter-project").addEventListener("change", loadHistory);
   $("fav-only").addEventListener("change", loadHistory);
-  $("close-detail").addEventListener("click", () => $("detail").classList.add("hidden"));
+  $("close-detail").addEventListener("click", closeDetail);
+  $("detail-backdrop").addEventListener("click", closeDetail);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeDetail();
+  });
   $("detail-stars").addEventListener("click", (e) => {
     const star = e.target.dataset.star;
     if (star) onRate(Number(star));
@@ -464,10 +488,10 @@ async function init() {
     $("prompt").value = CURRENT.prompt || "";
     if (CURRENT.model) $("model").value = CURRENT.model;
     const params = CURRENT.parameters || {};
-    $("preset").value = params.preset || "";
+    setPresetChip(params.preset || "");
     $("size").value = params.size || "";
     $("quality").value = params.quality || "";
-    $("detail").classList.add("hidden");
+    closeDetail();
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
   $("use-as-reference").addEventListener("click", () => {
@@ -475,7 +499,7 @@ async function init() {
     if (!REF_PATHS.includes(CURRENT.image)) REF_PATHS.push(CURRENT.image);
     setMode("i2i");
     renderRefs();
-    $("detail").classList.add("hidden");
+    closeDetail();
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
   $("save-as-character").addEventListener("click", async () => {

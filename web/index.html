@@ -8,21 +8,21 @@
 </head>
 <body>
 <header>
-  <div class="brand">imagegen <span>studio</span></div>
+  <div class="brand">imagegen<span class="brand-dot">·</span><span class="brand-sub">studio</span></div>
   <div class="header-info">
+    <span id="library-path" class="library-path" title="图库位置"></span>
     <select id="profile-select" title="当前配置"></select>
-    <span id="library-path" class="muted"></span>
   </div>
 </header>
 
-<main>
-  <section id="generator">
+<main class="workbench">
+  <section id="generator" class="panel">
     <h2>生成</h2>
     <div class="tabs">
       <button class="tab on" data-mode="t2i" type="button">文生图</button>
       <button class="tab" data-mode="i2i" type="button">图生图</button>
     </div>
-    <textarea id="prompt" rows="5" placeholder="描述你想要的图片，一句中文口语也可以——我会先润色再生成。直接粘贴完整提示词则原样使用。"></textarea>
+    <textarea id="prompt" rows="6" placeholder="描述你想要的图片——一句中文口语也可以，我会先润色再生成；直接粘贴完整提示词则原样使用。"></textarea>
     <div id="edit-panel" class="hidden">
       <label class="file-label">参考图（1-4 张，可从图库「用作参考」带入）
         <input id="ref-files" type="file" accept="image/*" multiple>
@@ -30,22 +30,10 @@
       <div id="ref-thumbs" class="ref-thumbs"></div>
     </div>
     <div class="field-row">
-      <label>模型
+      <label class="field">模型
         <select id="model"><option value="">默认 gpt-image-2</option></select>
       </label>
-      <label>预设
-        <select id="preset">
-          <option value="">不指定</option>
-          <option value="fast">fast 草稿</option>
-          <option value="standard">standard 日常</option>
-          <option value="quality" selected>quality 精出</option>
-          <option value="square-2k">square-2k</option>
-          <option value="landscape-2k">landscape-2k 横</option>
-          <option value="portrait-2k">portrait-2k 竖</option>
-          <option value="transparent">transparent 透明底</option>
-        </select>
-      </label>
-      <label>张数
+      <label class="field">张数
         <select id="n">
           <option value="1" selected>1</option>
           <option value="2">2</option>
@@ -54,26 +42,39 @@
         </select>
       </label>
     </div>
+    <div class="field">
+      <span class="field-label">预设</span>
+      <div class="chip-group" id="preset">
+        <button type="button" data-v="">自动</button>
+        <button type="button" data-v="fast">fast 草稿</button>
+        <button type="button" data-v="standard">standard</button>
+        <button type="button" data-v="quality" class="on">quality</button>
+        <button type="button" data-v="square-2k">2k 方</button>
+        <button type="button" data-v="landscape-2k">2k 横</button>
+        <button type="button" data-v="portrait-2k">2k 竖</button>
+        <button type="button" data-v="transparent">透明底</button>
+      </div>
+    </div>
     <div class="field-row">
-      <label>角色<select id="character"><option value="">不使用角色档案</option></select></label>
-      <label>项目<input id="project" placeholder="归类用途，如：继承人封面"></label>
+      <label class="field">角色<select id="character"><option value="">不使用角色档案</option></select></label>
+      <label class="field">项目<input id="project" placeholder="归类用途，如：继承人封面"></label>
     </div>
     <details class="advanced">
       <summary>自定义尺寸 / 高级（覆盖预设）</summary>
       <div class="field-row">
-        <label>尺寸（如 1536x1024）<input id="size" placeholder="留空用预设"></label>
-        <label>质量<input id="quality" placeholder="low / medium / high"></label>
-        <label>格式<input id="format" placeholder="png / webp"></label>
+        <label class="field">尺寸（如 1536x1024）<input id="size" placeholder="留空用预设"></label>
+        <label class="field">质量<input id="quality" placeholder="low / medium / high"></label>
+        <label class="field">格式<input id="format" placeholder="png / webp"></label>
       </div>
     </details>
     <details class="advanced">
       <summary>网关配置（多 profile 切换）</summary>
       <div id="profiles-list"></div>
       <form id="profile-form" class="field-row">
-        <label>名称<input id="pf-name" placeholder="如 apiclaw" required></label>
-        <label>Base URL<input id="pf-url" placeholder="https://.../v1" required></label>
-        <label>API Key<input id="pf-key" type="password" placeholder="留空 = 保留原 key"></label>
-        <button type="submit">保存</button>
+        <label class="field">名称<input id="pf-name" placeholder="如 apiclaw" required></label>
+        <label class="field">Base URL<input id="pf-url" placeholder="https://.../v1" required></label>
+        <label class="field">API Key<input id="pf-key" type="password" placeholder="留空 = 保留原 key"></label>
+        <button type="submit" class="btn-small">保存</button>
       </form>
       <p class="muted">key 只存在本机服务端配置文件里，页面永不回传。</p>
     </details>
@@ -81,9 +82,9 @@
       <summary>角色一致性档案</summary>
       <div id="characters-list"></div>
       <form id="character-form" class="field-row">
-        <label>角色名<input id="ch-name" placeholder="如 林德生" required></label>
-        <label>身份块（英文）<input id="ch-identity" placeholder="留空 = 从图库详情提取"></label>
-        <button type="submit">保存</button>
+        <label class="field">角色名<input id="ch-name" placeholder="如 林德生" required></label>
+        <label class="field">身份块（英文）<input id="ch-identity" placeholder="留空 = 从图库详情提取"></label>
+        <button type="submit" class="btn-small">保存</button>
       </form>
       <p class="muted">生成时选中角色会把身份块自动拼进提示词；图生图模式未传参考图时自动带其参考图。</p>
     </details>
@@ -95,20 +96,26 @@
   </section>
 
   <section id="library">
-    <h2>图库</h2>
+    <div class="library-head">
+      <h2>图库</h2>
+      <div id="stats-line" class="stats-line"></div>
+    </div>
     <div class="filter-row">
       <input id="search" placeholder="搜索提示词…">
       <select id="filter-model"><option value="">全部模型</option></select>
-      <label class="check"><input type="checkbox" id="fav-only"> 只看收藏</label>
       <select id="filter-project"><option value="">全部项目</option></select>
+      <label class="check"><input type="checkbox" id="fav-only"> 收藏</label>
       <button id="refresh" type="button" title="重新扫描">↻</button>
     </div>
-    <div id="stats-line" class="muted"></div>
     <div id="gallery" class="gallery"></div>
-    <div id="empty-hint" class="muted hidden">还没有图片——生成第一张吧。</div>
+    <div id="empty-hint" class="empty-hint hidden">
+      <p>还没有图片</p>
+      <p class="muted">在左侧写一句提示词，生成第一张。</p>
+    </div>
   </section>
 </main>
 
+<div id="detail-backdrop" class="hidden"></div>
 <aside id="detail" class="hidden">
   <button id="close-detail" type="button" class="icon-btn">✕</button>
   <img id="detail-img" alt="">
@@ -116,16 +123,16 @@
     <div id="detail-stars" class="stars" title="点击评分"></div>
     <p id="detail-prompt"></p>
     <table id="detail-params"></table>
+    <div class="field-row project-row">
+      <label class="field">项目归类<input id="detail-project" placeholder="项目名"></label>
+      <button id="save-project" type="button" class="btn-small">保存归类</button>
+    </div>
     <div class="detail-actions">
       <button id="copy-cmd" type="button">复制复现命令</button>
       <button id="open-folder" type="button">打开文件夹</button>
       <button id="use-as-variant" type="button">以此发起变体</button>
-      <button id="use-as-reference" type="button">用作图生图参考</button>
+      <button id="use-as-reference" type="button">用作参考</button>
       <button id="save-as-character" type="button">存为角色</button>
-    </div>
-    <div class="field-row">
-      <label>项目归类<input id="detail-project" placeholder="项目名"></label>
-      <button id="save-project" type="button">保存归类</button>
     </div>
     <div id="copy-hint" class="muted hidden">已复制到剪贴板</div>
   </div>
