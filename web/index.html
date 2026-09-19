@@ -54,6 +54,10 @@
         </select>
       </label>
     </div>
+    <div class="field-row">
+      <label>角色<select id="character"><option value="">不使用角色档案</option></select></label>
+      <label>项目<input id="project" placeholder="归类用途，如：继承人封面"></label>
+    </div>
     <details class="advanced">
       <summary>自定义尺寸 / 高级（覆盖预设）</summary>
       <div class="field-row">
@@ -73,6 +77,16 @@
       </form>
       <p class="muted">key 只存在本机服务端配置文件里，页面永不回传。</p>
     </details>
+    <details class="advanced">
+      <summary>角色一致性档案</summary>
+      <div id="characters-list"></div>
+      <form id="character-form" class="field-row">
+        <label>角色名<input id="ch-name" placeholder="如 林德生" required></label>
+        <label>身份块（英文）<input id="ch-identity" placeholder="留空 = 从图库详情提取"></label>
+        <button type="submit">保存</button>
+      </form>
+      <p class="muted">生成时选中角色会把身份块自动拼进提示词；图生图模式未传参考图时自动带其参考图。</p>
+    </details>
     <button id="generate-btn" type="button">生成</button>
     <div id="job-status" class="hidden">
       <span class="spinner"></span><span id="job-text">排队中…</span>
@@ -86,8 +100,10 @@
       <input id="search" placeholder="搜索提示词…">
       <select id="filter-model"><option value="">全部模型</option></select>
       <label class="check"><input type="checkbox" id="fav-only"> 只看收藏</label>
+      <select id="filter-project"><option value="">全部项目</option></select>
       <button id="refresh" type="button" title="重新扫描">↻</button>
     </div>
+    <div id="stats-line" class="muted"></div>
     <div id="gallery" class="gallery"></div>
     <div id="empty-hint" class="muted hidden">还没有图片——生成第一张吧。</div>
   </section>
@@ -105,6 +121,11 @@
       <button id="open-folder" type="button">打开文件夹</button>
       <button id="use-as-variant" type="button">以此发起变体</button>
       <button id="use-as-reference" type="button">用作图生图参考</button>
+      <button id="save-as-character" type="button">存为角色</button>
+    </div>
+    <div class="field-row">
+      <label>项目归类<input id="detail-project" placeholder="项目名"></label>
+      <button id="save-project" type="button">保存归类</button>
     </div>
     <div id="copy-hint" class="muted hidden">已复制到剪贴板</div>
   </div>

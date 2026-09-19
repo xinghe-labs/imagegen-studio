@@ -8,6 +8,7 @@ let CURRENT = null; // record shown in the detail drawer
 let MODE = "t2i";   // t2i | i2i
 let REF_FILES = []; // File objects awaiting upload
 let REF_PATHS = []; // library paths used as references
+let CHARACTERS = []; // character registry entries
 
 function esc(text) {
   const div = document.createElement("div");
@@ -113,6 +114,10 @@ async function submitT2I() {
 async function submitEdit() {
   const prompt = $("prompt").value.trim();
   if (!prompt) throw new Error("先写修改指令");
+  if (!REF_FILES.length && !REF_PATHS.length) {
+    const entry = CHARACTERS.find((c) => c.name === $("character").value);
+    if (entry && entry.has_reference) REF_PATHS.push(entry.reference_image);
+  }
   if (!REF_FILES.length && !REF_PATHS.length) throw new Error("图生图至少需要一张参考图");
   const form = new FormData();
   form.append("prompt", prompt);
@@ -134,6 +139,8 @@ function collectForm() {
   if ($("size").value.trim()) payload.size = $("size").value.trim();
   if ($("quality").value.trim()) payload.quality = $("quality").value.trim();
   if ($("format").value.trim()) payload.format = $("format").value.trim();
+  if ($("character").value) payload.character = $("character").value;
+  if ($("project").value.trim()) payload.project = $("project").value.trim();
   const profile = $("profile-select").value;
   if (profile && !$("profile-select").disabled) payload.profile = profile;
   return payload;
@@ -181,17 +188,101 @@ function showLatest(result) {
     .join("")}</div><div class="muted">${esc(result.model)} · ${esc(result.selection_reason || "")}</div>`;
 }
 
+/* ---------- characters / projects / stats ---------- */
+
+async function loadCharacters() {
+  const data = await api("/api/characters");
+  CHARACTERS = data.characters;
+  const select = $("character");
+  const current = select.value;
+  select.innerHTML = '<option value="">不使用角色档案</option>' +
+    CHARACTERS.map((c) => `<option value="${esc(c.name)}">${esc(c.name)}${c.has_reference ? " ◈" : ""}</option>`).join("");
+  if (CHARACTERS.some((c) => c.name === current)) select.value = current;
+}
+
+function renderCharacters() {
+  const list = $("characters-list");
+  if (!CHARACTERS.length) {
+    list.innerHTML = '<p class="muted">还没有角色——从图库详情「存为角色」，或用下面的表单手写身份块。</p>';
+    return;
+  }
+  list.innerHTML = CHARACTERS
+    .map(
+      (c) => `
+    <div class="profile-row">
+      <span class="profile-name">${esc(c.name)}</span>
+      <span class="muted">${c.has_reference ? "◈ 有参考图" : "纯文本"} · ${esc((c.identity_block || "").slice(0, 60))}…</span>
+      <button type="button" data-act="delete" data-name="${esc(c.name)}">删除</button>
+    </div>`
+    )
+    .join("");
+  for (const btn of list.querySelectorAll("button[data-act]")) {
+    btn.addEventListener("click", async () => {
+      try {
+        await api(`/api/characters/${encodeURIComponent(btn.dataset.name)}`, { method: "DELETE" });
+        await loadCharacters();
+        renderCharacters();
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+  }
+}
+
+async function onCharacterSubmit(e) {
+  e.preventDefault();
+  try {
+    await api("/api/characters", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: $("ch-name").value.trim(),
+        identity_block: $("ch-identity").value.trim(),
+      }),
+    });
+    $("ch-name").value = "";
+    $("ch-identity").value = "";
+    await loadCharacters();
+    renderCharacters();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function renderStats() {
+  const s = await api("/api/stats");
+  const mb = (s.bytes_total / 1048576).toFixed(1);
+  const models = Object.entries(s.by_model)
+    .sort((a, b) => b[1] - a[1])
+    .map(([m, n]) => `${m}×${n}`)
+    .join(" · ");
+  $("stats-line").textContent =
+    `共 ${s.total} 张 · 本月 ${s.this_month} · 收藏 ${s.favorites} · ${mb} MB　[${models || "无"}]`;
+}
+
 /* ---------- gallery / history ---------- */
 
 async function loadHistory() {
   const params = new URLSearchParams();
   if ($("search").value.trim()) params.set("q", $("search").value.trim());
   if ($("filter-model").value) params.set("model", $("filter-model").value);
+  if ($("filter-project").value) params.set("project", $("filter-project").value);
   if ($("fav-only").checked) params.set("favorites", "true");
   const data = await api(`/api/history?${params}`);
   RECORDS = data.records;
   renderGallery();
   refreshModelFilter();
+  refreshProjectFilter();
+  await renderStats();
+}
+
+function refreshProjectFilter() {
+  const select = $("filter-project");
+  const current = select.value;
+  const projects = [...new Set(RECORDS.map((r) => r.project).filter(Boolean))].sort();
+  select.innerHTML = '<option value="">全部项目</option>' +
+    projects.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+  if (projects.includes(current)) select.value = current;
 }
 
 function refreshModelFilter() {
@@ -233,10 +324,12 @@ function openDetail(record) {
     ["模型", record.model], ["编号选择", record.choice],
     ["预设", params.preset], ["尺寸", params.size], ["质量", params.quality],
     ["格式", params.output_format], ["张数", params.n],
+    ["项目", record.project], ["角色", record.character],
     ["生成时间", record.created_at],
   ].filter(([, v]) => v !== null && v !== undefined && v !== "");
   $("detail-params").innerHTML = rows
     .map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("");
+  $("detail-project").value = record.project || "";
   $("detail").classList.remove("hidden");
 }
 
@@ -323,6 +416,8 @@ async function onProfileSubmit(e) {
 async function init() {
   await loadMeta();
   renderProfiles();
+  await loadCharacters();
+  renderCharacters();
   await loadHistory();
 
   $("generate-btn").addEventListener("click", onGenerate);
@@ -335,9 +430,11 @@ async function init() {
     renderRefs();
   });
   $("profile-form").addEventListener("submit", onProfileSubmit);
+  $("character-form").addEventListener("submit", onCharacterSubmit);
   $("refresh").addEventListener("click", loadHistory);
   $("search").addEventListener("change", loadHistory);
   $("filter-model").addEventListener("change", loadHistory);
+  $("filter-project").addEventListener("change", loadHistory);
   $("fav-only").addEventListener("change", loadHistory);
   $("close-detail").addEventListener("click", () => $("detail").classList.add("hidden"));
   $("detail-stars").addEventListener("click", (e) => {
@@ -380,6 +477,38 @@ async function init() {
     renderRefs();
     $("detail").classList.add("hidden");
     window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+  $("save-as-character").addEventListener("click", async () => {
+    if (!CURRENT) return;
+    const name = window.prompt("角色名（用于拼进后续提示词）：");
+    if (!name || !name.trim()) return;
+    try {
+      await api("/api/characters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), from_image: CURRENT.image }),
+      });
+      await loadCharacters();
+      renderCharacters();
+      await copyText("已存为角色档案", "已存为角色档案");
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  $("save-project").addEventListener("click", async () => {
+    if (!CURRENT) return;
+    try {
+      await api("/api/project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: CURRENT.image, project: $("detail-project").value.trim() }),
+      });
+      CURRENT.project = $("detail-project").value.trim();
+      await loadHistory();
+      openDetail(CURRENT);
+    } catch (e) {
+      alert(e.message);
+    }
   });
 }
 

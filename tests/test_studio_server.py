@@ -317,6 +317,93 @@ class ImagegenServerTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_character_lifecycle_and_generation_annotation(self) -> None:
+        response = {"data": [{"b64_json": ONE_PIXEL_PNG_B64}]}
+        with FakeImageServer([(200, response), (200, response)]) as gateway:
+            self.profiles.write_text(
+                json.dumps({
+                    "profiles": [{"name": "test", "base_url": gateway.base_url, "api_key": "provider-secret-studio"}],
+                    "active": "test",
+                }),
+                encoding="utf-8",
+            )
+            first = poll_job(
+                self.client,
+                self.client.post("/api/generate", json={"prompt": "studio test cat"}).json()["job_id"],
+            )
+            self.assertEqual(first["status"], "done", first)
+            anchor = first["result"]["saved"][0]
+
+            saved = self.client.post(
+                "/api/characters",
+                json={"name": "主角", "from_image": anchor},
+            )
+            self.assertEqual(saved.status_code, 200, saved.text)
+            characters = self.client.get("/api/characters").json()["characters"]
+            self.assertEqual(len(characters), 1)
+            self.assertEqual(characters[0]["identity_block"], "studio test cat")
+            self.assertTrue(characters[0]["has_reference"])
+
+            second = poll_job(
+                self.client,
+                self.client.post(
+                    "/api/generate",
+                    json={"prompt": "in the rain", "character": "主角", "project": "小说A"},
+                ).json()["job_id"],
+            )
+            self.assertEqual(second["status"], "done", second)
+            history = self.client.get("/api/history").json()
+            record = next(r for r in history["records"] if r["character"] == "主角")
+            self.assertTrue((record["prompt"] or "").startswith("studio test cat"))
+            self.assertIn("in the rain", record["prompt"])
+            self.assertEqual(record["project"], "小说A")
+
+            deleted = self.client.delete("/api/characters/主角")
+            self.assertEqual(deleted.status_code, 200)
+            missing = self.client.post(
+                "/api/generate", json={"prompt": "x", "character": "主角"}
+            )
+            self.assertEqual(missing.status_code, 404)
+
+    def test_stats_and_project_filtering(self) -> None:
+        response = {"data": [{"b64_json": ONE_PIXEL_PNG_B64}]}
+        with FakeImageServer([(200, response)]) as gateway:
+            self.profiles.write_text(
+                json.dumps({
+                    "profiles": [{"name": "test", "base_url": gateway.base_url, "api_key": "provider-secret-studio"}],
+                    "active": "test",
+                }),
+                encoding="utf-8",
+            )
+            job = poll_job(
+                self.client,
+                self.client.post(
+                    "/api/generate",
+                    json={"prompt": "cover draft", "project": "小说A"},
+                ).json()["job_id"],
+            )
+            self.assertEqual(job["status"], "done", job)
+
+            stats = self.client.get("/api/stats").json()
+            self.assertEqual(stats["total"], 1)
+            self.assertEqual(stats["this_month"], 1)
+            self.assertEqual(stats["by_model"].get("gpt-image-2"), 1)
+            self.assertEqual(stats["by_project"].get("小说A"), 1)
+
+            filtered = self.client.get("/api/history", params={"project": "小说A"}).json()
+            self.assertEqual(filtered["total"], 1)
+            other = self.client.get("/api/history", params={"project": "别处"}).json()
+            self.assertEqual(other["total"], 0)
+
+            image = job["result"]["saved"][0]
+            moved = self.client.post(
+                "/api/project", json={"image": image, "project": "继承人封面"}
+            )
+            self.assertEqual(moved.status_code, 200)
+            stats = self.client.get("/api/stats").json()
+            self.assertEqual(stats["by_project"].get("继承人封面"), 1)
+            self.assertNotIn("小说A", stats["by_project"])
+
 
 if __name__ == "__main__":
     unittest.main()
