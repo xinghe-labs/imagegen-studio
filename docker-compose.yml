@@ -1,0 +1,20 @@
+services:
+  imagegen-studio:
+    build: .
+    container_name: imagegen-studio
+    ports:
+      - "8642:8642"
+    environment:
+      # Required when exposing beyond localhost: any random long string.
+      - IMAGE_GEN_TOKEN=${IMAGE_GEN_TOKEN:-}
+      - IMAGE_GEN_LIBRARY=/data/library
+      - IMAGE_GEN_PROFILES=/config/imagegen-profiles.json
+      - IMAGE_GEN_CHARACTERS=/config/imagegen-characters.json
+    volumes:
+      # The engine: clone image-gen next to this repo, or adjust the path.
+      - ../image-gen:/app/engine:ro
+      # Catalog + profiles + characters live here (survive rebuilds).
+      - ./config:/root/.codex
+      # The image library.
+      - ./library:/data/library
+    restart: unless-stopped
