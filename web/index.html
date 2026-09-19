@@ -22,6 +22,7 @@
       <button class="tab on" data-mode="t2i" type="button">文生图</button>
       <button class="tab" data-mode="i2i" type="button">图生图</button>
     </div>
+    <span class="gen-group-label">提示词</span>
     <textarea id="prompt" rows="6" placeholder="描述你想要的图片——一句中文口语也可以，我会先润色再生成；直接粘贴完整提示词则原样使用。"></textarea>
     <div id="edit-panel" class="hidden">
       <label class="file-label">参考图（1-4 张，可从图库「用作参考」带入）
@@ -29,6 +30,7 @@
       </label>
       <div id="ref-thumbs" class="ref-thumbs"></div>
     </div>
+    <span class="gen-group-label">参数</span>
     <div class="field-row">
       <label class="field">模型
         <select id="model"><option value="">默认 gpt-image-2</option></select>
@@ -55,6 +57,7 @@
         <button type="button" data-v="transparent">透明底</button>
       </div>
     </div>
+    <span class="gen-group-label">归类</span>
     <div class="field-row">
       <label class="field">角色<select id="character"><option value="">不使用角色档案</option></select></label>
       <label class="field">项目<input id="project" placeholder="归类用途，如：继承人封面"></label>
@@ -88,7 +91,7 @@
       </form>
       <p class="muted">生成时选中角色会把身份块自动拼进提示词；图生图模式未传参考图时自动带其参考图。</p>
     </details>
-    <button id="generate-btn" type="button">生成</button>
+    <button id="generate-btn" type="button">生成 <kbd>Ctrl ↵</kbd></button>
     <div id="job-status" class="hidden">
       <span class="spinner"></span><span id="job-text">排队中…</span>
     </div>
@@ -98,7 +101,7 @@
   <section id="library">
     <div class="library-head">
       <h2>图库</h2>
-      <div id="stats-line" class="stats-line"></div>
+      <div id="stats-line" class="stat-chips"></div>
     </div>
     <div class="filter-row">
       <input id="search" placeholder="搜索提示词…">

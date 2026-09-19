@@ -239,7 +239,39 @@ button:hover { border-color: var(--border-strong); }
 
 .library-head { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .library-head h2 { margin-bottom: 0; }
-.stats-line { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.stat-chips { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.stat-chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 14px;
+  line-height: 1.2;
+}
+.stat-chip .num { font-size: 16px; font-weight: 700; color: var(--accent); }
+.stat-chip .lbl { font-size: 11px; color: var(--muted); letter-spacing: 1px; }
+.stat-models { font-size: 12px; color: var(--muted); }
+
+.gen-group-label {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 11.5px;
+  letter-spacing: 2.5px;
+  color: var(--muted);
+}
+.gen-group-label:first-of-type { margin-top: 0; }
+
+kbd {
+  font: 11px "Consolas", monospace;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  padding: 1px 6px;
+  margin-left: 4px;
+  vertical-align: 2px;
+}
 
 .filter-row {
   position: sticky;
@@ -260,20 +292,21 @@ button:hover { border-color: var(--border-strong); }
 .check { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; white-space: nowrap; }
 
 .gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 14px;
+  columns: 4 220px;
+  column-gap: 14px;
 }
 
 .card {
   position: relative;
-  margin: 0;
+  margin: 0 0 14px;
+  width: 100%;
+  display: inline-block;
+  break-inside: avoid;
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
   background: var(--panel);
-  aspect-ratio: 1;
   transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
 }
 .card:hover {
@@ -282,8 +315,8 @@ button:hover { border-color: var(--border-strong); }
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
 }
 .card img {
-  width: 100%; height: 100%;
-  object-fit: cover;
+  width: 100%;
+  height: auto;
   display: block;
   transition: transform 0.4s ease;
 }

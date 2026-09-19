@@ -271,12 +271,17 @@ async function onCharacterSubmit(e) {
 async function renderStats() {
   const s = await api("/api/stats");
   const mb = (s.bytes_total / 1048576).toFixed(1);
-  const models = Object.entries(s.by_model)
-    .sort((a, b) => b[1] - a[1])
-    .map(([m, n]) => `${m}×${n}`)
-    .join(" · ");
-  $("stats-line").textContent =
-    `共 ${s.total} 张 · 本月 ${s.this_month} · 收藏 ${s.favorites} · ${mb} MB　[${models || "无"}]`;
+  const chips = [
+    ["总图数", s.total],
+    ["本月", s.this_month],
+    ["收藏", s.favorites],
+    ["容量", `${mb} MB`],
+  ];
+  const byModel = Object.entries(s.by_model).sort((a, b) => b[1] - a[1]);
+  const modelText = byModel.map(([m, n]) => `${m}×${n}`).join(" · ");
+  $("stats-line").innerHTML =
+    chips.map(([k, v]) => `<span class="stat-chip"><span class="num">${esc(v)}</span><span class="lbl">${esc(k)}</span></span>`).join("") +
+    (modelText ? `<span class="stat-models">${esc(modelText)}</span>` : "");
 }
 
 /* ---------- gallery / history ---------- */
@@ -316,11 +321,15 @@ function refreshModelFilter() {
 function renderGallery() {
   const grid = $("gallery");
   $("empty-hint").classList.toggle("hidden", RECORDS.length > 0);
-  grid.innerHTML = RECORDS.map((r, i) => `
-    <figure class="card" data-index="${i}">
+  grid.innerHTML = RECORDS.map((r, i) => {
+    const ratio = r.width && r.height ? ` style="aspect-ratio:${r.width}/${r.height}"` : "";
+    return `
+    <figure class="card"${ratio} data-index="${i}">
       <img src="/api/image?path=${encodeURIComponent(r.image)}" alt="" loading="lazy">
-      <figcaption>${r.rating ? "★".repeat(r.rating) : ""} ${esc((r.prompt || "").slice(0, 42))}</figcaption>
-    </figure>`).join("");
+      ${r.rating ? `<span class="star-badge">★${r.rating}</span>` : ""}
+      <figcaption>${esc((r.prompt || "").slice(0, 70))}</figcaption>
+    </figure>`;
+  }).join("");
   for (const card of grid.querySelectorAll(".card")) {
     card.addEventListener("click", () => openDetail(RECORDS[Number(card.dataset.index)]));
   }
@@ -441,6 +450,9 @@ async function init() {
   await loadHistory();
 
   $("generate-btn").addEventListener("click", onGenerate);
+  $("prompt").addEventListener("keydown", (e) => {
+    if (e.ctrlKey && e.key === "Enter") onGenerate();
+  });
   for (const tab of document.querySelectorAll(".tab")) {
     tab.addEventListener("click", () => setMode(tab.dataset.mode));
   }

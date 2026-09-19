@@ -264,6 +264,8 @@ def scan_history(library: Path) -> list[dict[str, Any]]:
             stat = image_path.stat()
         except OSError:
             continue
+        output_meta = record.get("output") if isinstance(record.get("output"), dict) else {}
+        final_size = output_meta.get("final_size") or [None, None]
         records.append(
             {
                 "image": str(image_path),
@@ -273,6 +275,8 @@ def scan_history(library: Path) -> list[dict[str, Any]]:
                 "created_at": created,
                 "rating": int(record.get("rating") or 0),
                 "bytes": stat.st_size,
+                "width": final_size[0],
+                "height": final_size[1],
                 "parameters": record.get("parameters", {}),
                 "choice": record.get("choice"),
                 "project": record.get("project"),
