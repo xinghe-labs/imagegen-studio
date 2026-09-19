@@ -2,16 +2,16 @@
    深炭底 / 青色主调 / 琥珀点缀，呼应图库夜片的青橙色调。 */
 
 :root {
-  --bg: #0d0b09;
-  --panel: #171310;
-  --panel-2: #1e1813;
-  --input: #191410;
-  --border: rgba(184, 160, 130, 0.15);
-  --border-strong: rgba(184, 160, 130, 0.3);
-  --text: #f0ebe4;
-  --muted: #a89a8a;
-  --accent: #f0a545;
-  --accent-dim: rgba(240, 165, 69, 0.1);
+  --bg: #0a0e13;
+  --panel: #11171e;
+  --panel-2: #161d26;
+  --input: #121821;
+  --border: rgba(148, 170, 195, 0.15);
+  --border-strong: rgba(148, 170, 195, 0.3);
+  --text: #e6edf4;
+  --muted: #93a1b0;
+  --accent: #38bdf8;
+  --accent-dim: rgba(56, 189, 248, 0.1);
   --amber: #f0b429;
   --danger: #f87171;
 }
@@ -26,20 +26,20 @@ body {
   color: var(--text);
   font: 15px/1.55 "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
   background:
-    radial-gradient(1100px 700px at 72% -8%, rgba(240, 165, 69, 0.06), transparent 60%),
-    radial-gradient(900px 600px at 0% 110%, rgba(214, 108, 58, 0.045), transparent 55%),
+    radial-gradient(1100px 700px at 72% -8%, rgba(56, 189, 248, 0.06), transparent 60%),
+    radial-gradient(900px 600px at 0% 110%, rgba(99, 140, 248, 0.045), transparent 55%),
     var(--bg);
   background-attachment: fixed;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2b241d; border-radius: 6px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb { background: #232c38; border-radius: 6px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: #3a2f24; }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 
-::selection { background: rgba(240, 165, 69, 0.25); }
+::selection { background: rgba(56, 189, 248, 0.25); }
 
 /* ---------- header ---------- */
 
@@ -53,7 +53,7 @@ header {
   gap: 16px;
   padding: 10px 20px;
   border-bottom: 1px solid var(--border);
-  background: rgba(13, 11, 9, 0.82);
+  background: rgba(10, 14, 19, 0.82);
   backdrop-filter: blur(10px);
 }
 
@@ -89,7 +89,7 @@ header {
 }
 
 .panel {
-  background: linear-gradient(180deg, #181310, #120f0c);
+  background: linear-gradient(180deg, #141b23, #10161d);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 14px;
@@ -162,7 +162,7 @@ button:hover { border-color: var(--border-strong); }
 .tabs {
   display: flex;
   gap: 4px;
-  background: #0d0a08;
+  background: #0b0f15;
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 3px;
@@ -201,7 +201,7 @@ button:hover { border-color: var(--border-strong); }
   padding: 11px 0;
   background: var(--accent);
   border: 1px solid var(--accent);
-  color: #1a1206;
+  color: #07141c;
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 10px;
@@ -209,7 +209,7 @@ button:hover { border-color: var(--border-strong); }
   border-radius: 10px;
   transition: box-shadow 0.2s, transform 0.1s;
 }
-#generate-btn:hover { box-shadow: 0 4px 26px rgba(240, 165, 69, 0.35); }
+#generate-btn:hover { box-shadow: 0 4px 26px rgba(56, 189, 248, 0.32); }
 #generate-btn:active { transform: scale(0.985); }
 #generate-btn:disabled { opacity: 0.55; cursor: wait; }
 
@@ -308,7 +308,7 @@ kbd {
   flex-wrap: wrap;
   margin: 12px 0 16px;
   padding: 10px;
-  background: rgba(18, 14, 11, 0.88);
+  background: rgba(14, 19, 25, 0.88);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -398,7 +398,7 @@ kbd {
   padding: 4px 8px;
   border-radius: 7px;
   font-size: 12px;
-  background: rgba(12, 8, 4, 0.74);
+  background: rgba(8, 12, 17, 0.74);
   color: #e2eaf1;
   border: 1px solid rgba(150, 166, 184, 0.3);
   backdrop-filter: blur(4px);
@@ -410,7 +410,7 @@ kbd {
   padding: 2px 7px;
   border-radius: 999px;
   font-size: 11.5px;
-  background: rgba(12, 8, 4, 0.68);
+  background: rgba(8, 12, 17, 0.68);
   color: var(--amber);
   backdrop-filter: blur(4px);
 }
@@ -440,7 +440,7 @@ kbd {
   width: min(470px, 100vw);
   height: 100vh;
   z-index: 10;
-  background: #17120e;
+  background: #131920;
   border-left: 1px solid var(--border);
   padding: 18px;
   overflow-y: auto;
@@ -463,12 +463,12 @@ kbd {
   max-height: 44vh;
   object-fit: contain;
   border-radius: 10px;
-  background: #0b0806;
+  background: #070b10;
 }
 .detail-body { margin-top: 14px; }
 
 .stars { font-size: 25px; cursor: pointer; margin-bottom: 10px; letter-spacing: 4px; }
-.star { color: #3a3128; transition: color 0.12s, transform 0.12s; display: inline-block; }
+.star { color: #333d49; transition: color 0.12s, transform 0.12s; display: inline-block; }
 .star:hover { transform: scale(1.15); }
 .star.on { color: var(--amber); }
 
