@@ -232,6 +232,20 @@ class ImagegenServerTest(unittest.TestCase):
             self.assertIn('--prompt "reproduce me"', command)
             self.assertIn("--preset quality", command)
 
+    def test_meta_works_without_any_profiles_file(self) -> None:
+        # Regression: zero-config machines have no profiles file; /api/meta
+        # must still return 200 so the UI initializes.
+        app = server_module.create_app(
+            library_root=self.library,
+            profiles_path=self.tmpdir / "does-not-exist.json",
+        )
+        client = TestClient(app)
+        response = client.get("/api/meta")
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertEqual(data["profiles"], [])
+        self.assertIsNone(data["active"])
+
     def test_token_guard_when_configured(self) -> None:
         app = server_module.create_app(
             library_root=self.library, profiles_path=self.profiles, token="s3cret"

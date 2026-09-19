@@ -127,10 +127,11 @@ def masked_profiles(profiles: dict[str, Any]) -> list[dict[str, Any]]:
 
 def active_profile(profiles: dict[str, Any]) -> dict[str, Any] | None:
     wanted = profiles.get("active")
-    for profile in profiles.get("profiles", []):
+    entries = profiles.get("profiles") or []
+    for profile in entries:
         if profile.get("name") == wanted:
             return profile
-    return profiles.get("profiles", [None])[0]
+    return entries[0] if entries else None
 
 
 def load_catalog_models(base_url: str | None) -> list[dict[str, Any]]:
