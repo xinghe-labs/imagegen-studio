@@ -17,6 +17,7 @@
 
 <main class="workbench">
   <section id="generator" class="panel">
+    <div class="gen-scroll">
     <h2>生成</h2>
     <div class="tabs">
       <button class="tab on" data-mode="t2i" type="button">文生图</button>
@@ -100,11 +101,14 @@
       </form>
       <p class="muted">生成时选中角色会把身份块自动拼进提示词；图生图模式未传参考图时自动带其参考图。</p>
     </details>
-    <button id="generate-btn" type="button">生成 <kbd>Ctrl ↵</kbd></button>
-    <div id="job-status" class="hidden">
-      <span class="spinner"></span><span id="job-text">排队中…</span>
-    </div>
     <div id="latest"></div>
+    </div>
+    <div class="gen-footer">
+      <div id="job-status" class="hidden">
+        <span class="spinner"></span><span id="job-text">排队中…</span>
+      </div>
+      <button id="generate-btn" type="button">生成 <kbd>Ctrl ↵</kbd></button>
+    </div>
   </section>
 
   <section id="library">

@@ -407,17 +407,19 @@ def create_app(
             raise HTTPException(404, f"profile 不存在: {payload_profile}")
         return active_profile(profiles)
 
+    no_store = {"Cache-Control": "no-cache"}
+
     @app.get("/")
     async def index() -> FileResponse:
-        return FileResponse(WEB_DIR / "index.html")
+        return FileResponse(WEB_DIR / "index.html", headers=no_store)
 
     @app.get("/app.js")
     async def app_js() -> FileResponse:
-        return FileResponse(WEB_DIR / "app.js", media_type="text/javascript")
+        return FileResponse(WEB_DIR / "app.js", media_type="text/javascript", headers=no_store)
 
     @app.get("/style.css")
     async def style_css() -> FileResponse:
-        return FileResponse(WEB_DIR / "style.css", media_type="text/css")
+        return FileResponse(WEB_DIR / "style.css", media_type="text/css", headers=no_store)
 
     @app.get("/api/meta")
     async def meta() -> dict[str, Any]:
