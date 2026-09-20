@@ -26,6 +26,24 @@ async function api(path, options) {
   return res.json();
 }
 
+function toast(message, type = "info") {
+  let box = document.getElementById("toast-box");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "toast-box";
+    document.body.append(box);
+  }
+  const el = document.createElement("div");
+  el.className = `toast toast-${type}`;
+  el.textContent = message;
+  box.append(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+  setTimeout(() => {
+    el.classList.remove("show");
+    setTimeout(() => el.remove(), 320);
+  }, 3400);
+}
+
 /* ---------- meta / profiles ---------- */
 
 async function loadMeta() {
@@ -194,9 +212,10 @@ async function onGenerate() {
     const job_id = MODE === "i2i" ? await submitEdit() : await submitT2I();
     const result = await pollJob(job_id);
     showLatest(result);
+    toast(`生成完成 · ${result.model || ""}`, "success");
     await loadHistory();
   } catch (e) {
-    alert(`生成失败：${e.message}`);
+    toast(`生成失败：${e.message}`, "error");
   } finally {
     $("generate-btn").disabled = false;
     $("job-status").classList.add("hidden");
@@ -246,7 +265,7 @@ function renderCharacters() {
         await loadCharacters();
         renderCharacters();
       } catch (e) {
-        alert(e.message);
+        toast(e.message, "error");
       }
     });
   }
@@ -268,7 +287,7 @@ async function onCharacterSubmit(e) {
     await loadCharacters();
     renderCharacters();
   } catch (err) {
-    alert(err.message);
+    toast(err.message, "error");
   }
 }
 
@@ -480,7 +499,7 @@ function renderProfiles() {
         await loadMeta();
         renderProfiles();
       } catch (e) {
-        alert(e.message);
+        toast(e.message, "error");
       }
     });
   }
@@ -500,7 +519,7 @@ async function onProfileSubmit(e) {
     await loadMeta();
     renderProfiles();
   } catch (err) {
-    alert(err.message);
+    toast(err.message, "error");
   }
 }
 
@@ -586,7 +605,7 @@ async function init() {
       renderCharacters();
       await copyText("已存为角色档案", "已存为角色档案");
     } catch (e) {
-      alert(e.message);
+      toast(e.message, "error");
     }
   });
   $("save-project").addEventListener("click", async () => {
@@ -601,9 +620,9 @@ async function init() {
       await loadHistory();
       openDetail(CURRENT);
     } catch (e) {
-      alert(e.message);
+      toast(e.message, "error");
     }
   });
 }
 
-init().catch((e) => alert(`初始化失败：${e.message}`));
+init().catch((e) => toast(`初始化失败：${e.message}`), "error");
