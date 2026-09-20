@@ -139,9 +139,15 @@ textarea, input, select, button {
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 9px;
-  padding: 8px 11px;
+  padding: 7px 11px;
   font: inherit;
+  line-height: 1.45;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+select {
+  padding-block: 6px;
+  appearance: auto;
 }
 
 textarea { width: 100%; resize: vertical; }
@@ -210,6 +216,12 @@ button:hover { border-color: var(--border-strong); }
   text-indent: 10px;
   border-radius: 10px;
   transition: box-shadow 0.2s, transform 0.1s;
+}
+#generate-btn kbd {
+  letter-spacing: normal;
+  text-indent: 0;
+  margin-left: 10px;
+  vertical-align: 1px;
 }
 #generate-btn:hover { box-shadow: 0 4px 26px rgba(56, 189, 248, 0.32); }
 #generate-btn:active { transform: scale(0.985); }
@@ -371,21 +383,21 @@ kbd {
 .ratio-group { display: flex; flex-wrap: wrap; gap: 8px; }
 .ratio-group button {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 7px 12px;
-  border-radius: 10px;
-  font-size: 12px;
+  gap: 8px;
+  padding: 7px 13px;
+  border-radius: 9px;
+  font-size: 12.5px;
   color: var(--muted);
   background: var(--input);
 }
 .ratio-group button:hover { color: var(--text); border-color: var(--border-strong); }
 .ratio-group button.on { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
-.ratio-group .rect { display: block; border: 1.5px solid currentColor; border-radius: 2px; }
-.ratio-group .rect.sq { width: 15px; height: 15px; }
-.ratio-group .rect.wide { width: 21px; height: 14px; }
-.ratio-group .rect.tall { width: 14px; height: 21px; }
+.ratio-group .rect { display: block; border: 2px solid currentColor; border-radius: 2px; }
+.ratio-group button.on .rect { background: currentColor; }
+.ratio-group .rect.sq { width: 14px; height: 14px; }
+.ratio-group .rect.wide { width: 19px; height: 13px; }
+.ratio-group .rect.tall { width: 13px; height: 19px; }
 
 .quick-bar {
   position: absolute;
