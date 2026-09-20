@@ -4,6 +4,10 @@
 
 本地优先的**生图工作台**：生成器为主的中文 Web 界面，跑在 [image-gen](https://github.com/xinghe-labs/image-gen) 引擎上。输入一句提示词（中文口语也行），润色、生成、收藏、复现、变体，一站完成；agent 通道与命令行共用同一份账本，互不干扰。
 
+## 截图
+
+![imagegen studio](docs/screenshot.png)
+
 ## 功能
 
 - **文生图** — 提示词 + 模型（编号目录）+ 预设/自定义尺寸 + 1-4 张批量，任务进度实时显示
