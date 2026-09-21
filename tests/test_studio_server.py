@@ -359,6 +359,29 @@ class ImagegenServerTest(unittest.TestCase):
             job = poll_job(self.client, created.json()["job_id"])
             self.assertEqual(job["status"], "done", job)
 
+    def test_generate_rejects_missing_credentials_before_queuing(self) -> None:
+        # AVOID any inherited env key slipping through on the host/CI.
+        for key in ("IMAGE_GENERATION_API_KEY", "GPT_IMAGE_API_KEY", "OPENAI_API_KEY"):
+            os.environ.pop(key, None)
+        self.profiles.write_text(json.dumps({"profiles": [], "active": None}), encoding="utf-8")
+        r = self.client.post("/api/generate", json={"prompt": "no credit card here"})
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertIn("还没有配置任何网关凭据", r.json()["detail"])
+        self.assertNotIn("job_id", r.json())
+
+    def test_generate_rejects_missing_credentials_on_edit_missing_key(self) -> None:
+        self.profiles.write_text(
+            json.dumps({"profiles": [{"name": "nokey", "base_url": "http://127.0.0.1:1"}], "active": "nokey"}),
+            encoding="utf-8",
+        )
+        r = self.client.post(
+            "/api/edit",
+            data={"prompt": "swap the sky"},
+            files={"images": ("ref.png", b"\x89PNG-fake-bytes", "image/png")},
+        )
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertIn("还没有配置任何网关凭据", r.json()["detail"])
+
     def test_edit_rejects_paths_outside_library(self) -> None:
         outside = self.tmpdir / "outside.png"
         outside.write_bytes(b"x")

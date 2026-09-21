@@ -87,6 +87,39 @@ def load_json_file(path: Path, fallback: Any) -> Any:
         return fallback
 
 
+_CREDENTIAL_ENV_KEYS = ("IMAGE_GENERATION_API_KEY", "GPT_IMAGE_API_KEY", "OPENAI_API_KEY")
+
+
+def windows_user_env() -> dict[str, str]:
+    if os.name != "nt":
+        return {}
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as key:
+            return {n: str(winreg.QueryValueEx(key, n)[0]) for n in _CREDENTIAL_ENV_KEYS}
+    except OSError:
+        return {}
+
+
+def has_gateway_credentials(profile: dict[str, Any] | None) -> bool:
+    if profile and profile.get("api_key"):
+        return True
+    if any(os.environ.get(k) for k in _CREDENTIAL_ENV_KEYS):
+        return True
+    user_env = windows_user_env()
+    return any(user_env.get(k) for k in _CREDENTIAL_ENV_KEYS)
+
+
+def require_gateway_credentials(profile: dict[str, Any] | None) -> None:
+    if has_gateway_credentials(profile):
+        return
+    raise HTTPException(
+        400,
+        "还没有配置任何网关凭据：请在上方栏添加一个 profile（名称 + API key + base URL），"
+        "或设置环境变量 IMAGE_GENERATION_API_KEY / IMAGE_GENERATION_BASE_URL 后再生成。",
+    )
+
+
 def save_json_file(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
@@ -448,6 +481,7 @@ def create_app(
     @app.post("/api/generate")
     async def generate(payload: GenerateRequest) -> dict[str, Any]:
         profile = profile_for(payload.profile)
+        require_gateway_credentials(profile)
         child_env = os.environ.copy()
         if profile:
             if profile.get("api_key"):
@@ -656,6 +690,7 @@ def create_app(
             args += ["--n", n]
 
         profile_entry = profile_for(profile or None)
+        require_gateway_credentials(profile_entry)
         child_env = os.environ.copy()
         if profile_entry:
             if profile_entry.get("api_key"):
