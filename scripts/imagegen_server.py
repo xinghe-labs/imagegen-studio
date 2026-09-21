@@ -120,6 +120,7 @@ def parse_prompt_source(raw: str, fmt: str) -> list[dict[str, Any]]:
                     "prompt": str(item["prompt"]).strip(),
                     "category": item.get("category"),
                     "tags": item.get("tags") or [],
+                    "image": item.get("image"),
                 })
     else:
         for line in raw.splitlines():
@@ -676,6 +677,20 @@ def create_app(
         builtin = load_json_file(BUILTIN_PROMPTS_PATH, {"prompts": [], "categories": []})
         store = load_json_file(prompts_file, {"sources": [], "pulled": [], "custom": []})
         merged = list(builtin.get("prompts", [])) + list(store.get("pulled", [])) + list(store.get("custom", []))
+        by_prompt: dict[str, dict[str, Any]] = {}
+        for rec in scan_history(library):
+            key = normalize_prompt_key(rec.get("prompt"))
+            if key and key not in by_prompt:
+                by_prompt[key] = rec
+        for entry in merged:
+            own_image = entry.get("image")
+            if not own_image:
+                rec = by_prompt.get(normalize_prompt_key(entry.get("prompt")))
+                own_image = rec["image"] if rec else None
+                if rec:
+                    entry["image_w"] = rec.get("width")
+                    entry["image_h"] = rec.get("height")
+            entry["image"] = own_image
         categories = list(builtin.get("categories", []))
         for entry in merged:
             cat = entry.get("category")

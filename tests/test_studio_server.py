@@ -523,5 +523,26 @@ class PromptLibraryTest(unittest.TestCase):
         self.assertEqual(len(js), 1)
         self.assertEqual(js[0]["title_zh"], "玻璃鸟")
 
+    def test_prompt_cards_surface_gallery_thumbnails(self) -> None:
+        prompt_text = "A lone convenience store glowing on an empty rain-soaked street at 2am, cinematic"
+        image = self.tmpdir / "library" / "match.png"
+        image.write_bytes(b"fake image bytes")
+        Path(str(image) + ".json").write_text(json.dumps({
+            "record_type": "image-gen-sidecar",
+            "model": "gpt-image-2",
+            "prompt": prompt_text,
+            "created_at": "2026-09-21T10:00:00+08:00",
+            "parameters": {},
+        }), encoding="utf-8")
+        added = self.client.post("/api/prompts", json={"title_zh": "便利店", "prompt": prompt_text})
+        self.assertEqual(added.status_code, 200, added.text)
+        data = self.client.get("/api/prompts", params={"q": "lone convenience"}).json()
+        entry = next(p for p in data["prompts"] if p["source"] == "custom")
+        self.assertIsNotNone(entry["image"])
+        self.assertTrue(entry["image"].endswith("match.png"))
+        # builtin variant has different text, so it gets no gallery match
+        builtin = next(p for p in data["prompts"] if p["source"] == "builtin")
+        self.assertIsNone(builtin["image"])
+
 if __name__ == "__main__":
     unittest.main()

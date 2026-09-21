@@ -499,15 +499,23 @@ function renderPromptLibrary() {
       loadPrompts();
     });
   }
-  $("pl-list").innerHTML = PROMPTS.map((p) => `
+  $("pl-list").innerHTML = PROMPTS.map((p) => {
+    const thumb = p.image
+      ? (String(p.image).startsWith("http")
+          ? p.image
+          : `/api/image?path=${encodeURIComponent(p.image)}`)
+      : null;
+    return `
     <div class="pl-card" data-id="${esc(p.id)}">
+      ${thumb ? `<img class="pl-thumb" src="${esc(thumb)}" alt="" loading="lazy">` : ""}
       <div class="pl-title">${esc(p.title_zh || "")}</div>
       <div class="pl-text">${esc(p.prompt)}</div>
       <div class="pl-meta">
         <span>${esc(p.category || "")} · ${esc((p.source || "").replace("builtin", "内置"))}</span>
         ${p.source !== "builtin" ? `<button type="button" class="pl-del" data-del="${esc(p.id)}">删</button>` : ""}
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
   for (const card of document.querySelectorAll(".pl-card")) {
     card.addEventListener("click", (e) => {
       if (e.target.closest(".pl-del")) return;
