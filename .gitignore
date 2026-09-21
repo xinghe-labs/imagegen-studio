@@ -3,3 +3,5 @@ __pycache__/
 .env
 output/
 .DS_Store
+studio.log
+studio.err.log

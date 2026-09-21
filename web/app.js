@@ -489,6 +489,29 @@ function closePromptLibrary() {
   $("prompt-library").classList.add("hidden");
 }
 
+const PL_GRADIENTS = [
+  ["#1e3a5f", "#38bdf8"], ["#312e81", "#818cf8"], ["#134e4a", "#2dd4bf"],
+  ["#1e293b", "#64748b"], ["#4c1d95", "#c084fc"], ["#0c4a6e", "#22d3ee"],
+  ["#3730a3", "#60a5fa"], ["#155e75", "#67e8f9"],
+];
+const PL_GLYPHS = ["✦", "◈", "◉", "◆", "▲", "●", "✧", "❖"];
+
+function placeholderThumb(id) {
+  let h = 0;
+  for (const ch of String(id || "")) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  const [c1, c2] = PL_GRADIENTS[h % PL_GRADIENTS.length];
+  const glyph = PL_GLYPHS[(h >>> 3) % PL_GLYPHS.length];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 118">`
+    + `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">`
+    + `<stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs>`
+    + `<rect width="300" height="118" fill="url(#g)"/>`
+    + `<circle cx="${40 + (h % 120)}" cy="${20 + ((h >>> 4) % 60)}" r="52" fill="#fff" opacity="0.07"/>`
+    + `<circle cx="${180 + ((h >>> 6) % 90)}" cy="${60 + ((h >>> 8) % 50)}" r="34" fill="#fff" opacity="0.05"/>`
+    + `<text x="150" y="64" text-anchor="middle" font-size="30" fill="#fff" opacity="0.45">${glyph}</text>`
+    + `</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
 function renderPromptLibrary() {
   $("pl-cats").innerHTML = ["", ...PROMPT_CATS]
     .map((c) => `<button type="button" class="${(PL_CATEGORY || "") === c ? "on" : ""}" data-cat="${esc(c)}">${c || "全部"}</button>`)
@@ -504,10 +527,10 @@ function renderPromptLibrary() {
       ? (String(p.image).startsWith("http")
           ? p.image
           : `/api/image?path=${encodeURIComponent(p.image)}`)
-      : null;
+      : placeholderThumb(p.id);
     return `
     <div class="pl-card" data-id="${esc(p.id)}">
-      ${thumb ? `<img class="pl-thumb" src="${esc(thumb)}" alt="" loading="lazy">` : ""}
+      <img class="pl-thumb" src="${esc(thumb)}" alt="" loading="lazy">
       <div class="pl-title">${esc(p.title_zh || "")}</div>
       <div class="pl-text">${esc(p.prompt)}</div>
       <div class="pl-meta">
