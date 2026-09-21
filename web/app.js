@@ -9,6 +9,9 @@ let MODE = "t2i";   // t2i | i2i
 let REF_FILES = []; // File objects awaiting upload
 let REF_PATHS = []; // library paths used as references
 let CHARACTERS = []; // character registry entries
+let PROMPTS = [];   // prompt library entries
+let PROMPT_CATS = []; // prompt categories
+let PL_CATEGORY = '';
 
 function esc(text) {
   const div = document.createElement("div");
@@ -464,6 +467,126 @@ async function copyText(text, hint) {
   setTimeout(() => $("copy-hint").classList.add("hidden"), 1500);
 }
 
+/* ---------- prompt library ---------- */
+
+async function loadPrompts() {
+  const params = new URLSearchParams();
+  if ($("pl-search").value.trim()) params.set("q", $("pl-search").value.trim());
+  if (PL_CATEGORY) params.set("category", PL_CATEGORY);
+  const data = await api(`/api/prompts?${params}`);
+  PROMPTS = data.prompts;
+  PROMPT_CATS = data.categories;
+  renderPromptLibrary();
+}
+
+function openPromptLibrary() {
+  $("prompt-library").classList.remove("hidden");
+  loadPrompts();
+  renderPromptSources();
+}
+
+function closePromptLibrary() {
+  $("prompt-library").classList.add("hidden");
+}
+
+function renderPromptLibrary() {
+  $("pl-cats").innerHTML = ["", ...PROMPT_CATS]
+    .map((c) => `<button type="button" class="${(PL_CATEGORY || "") === c ? "on" : ""}" data-cat="${esc(c)}">${c || "全部"}</button>`)
+    .join("");
+  for (const btn of document.querySelectorAll("#pl-cats button")) {
+    btn.addEventListener("click", () => {
+      PL_CATEGORY = btn.dataset.cat;
+      loadPrompts();
+    });
+  }
+  $("pl-list").innerHTML = PROMPTS.map((p) => `
+    <div class="pl-card" data-id="${esc(p.id)}">
+      <div class="pl-title">${esc(p.title_zh || "")}</div>
+      <div class="pl-text">${esc(p.prompt)}</div>
+      <div class="pl-meta">
+        <span>${esc(p.category || "")} · ${esc((p.source || "").replace("builtin", "内置"))}</span>
+        ${p.source !== "builtin" ? `<button type="button" class="pl-del" data-del="${esc(p.id)}">删</button>` : ""}
+      </div>
+    </div>`).join("");
+  for (const card of document.querySelectorAll(".pl-card")) {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".pl-del")) return;
+      const entry = PROMPTS.find((x) => x.id === card.dataset.id);
+      if (!entry) return;
+      $("prompt").value = entry.prompt;
+      closePromptLibrary();
+      toast("已填入提示词", "success");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  }
+  for (const del of document.querySelectorAll(".pl-del")) {
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        await api(`/api/prompts/${encodeURIComponent(del.dataset.del)}`, { method: "DELETE" });
+        await loadPrompts();
+      } catch (err) {
+        toast(err.message, "error");
+      }
+    });
+  }
+}
+
+async function renderPromptSources() {
+  const data = await api("/api/prompts/sources");
+  const list = $("pl-sources-list");
+  list.innerHTML = data.sources.length
+    ? data.sources.map((s) => `
+      <div class="profile-row">
+        <span class="profile-name">${esc(s.name)}</span>
+        <span class="muted">${esc(s.url)} · ${esc(s.format)}</span>
+        <button type="button" data-del="${esc(s.name)}">删除</button>
+      </div>`).join("")
+    : '<p class="muted">还没有配置源——添加 GitHub raw 地址后点「同步」。</p>';
+  for (const btn of list.querySelectorAll("button[data-del]")) {
+    btn.addEventListener("click", async () => {
+      try {
+        await api(`/api/prompts/sources/${encodeURIComponent(btn.dataset.del)}`, { method: "DELETE" });
+        await renderPromptSources();
+      } catch (err) {
+        toast(err.message, "error");
+      }
+    });
+  }
+}
+
+async function onPromptSourceSubmit(e) {
+  e.preventDefault();
+  const form = new FormData();
+  form.append("name", $("pl-src-name").value.trim());
+  form.append("url", $("pl-src-url").value.trim());
+  form.append("format", $("pl-src-format").value);
+  try {
+    await api("/api/prompts/sources", { method: "POST", body: form });
+    $("pl-src-name").value = "";
+    $("pl-src-url").value = "";
+    await renderPromptSources();
+    toast("源已添加，点「同步」拉取", "success");
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+async function onPromptSync() {
+  $("pl-sync").disabled = true;
+  try {
+    const result = await api("/api/prompts/sync", { method: "POST" });
+    const parts = Object.entries(result.synced).map(([k, v]) => `${k} ${v}`);
+    toast(parts.length ? `同步完成：${parts.join("，")}` : "没有配置源，先添加 GitHub 源", parts.length ? "success" : "error");
+    await loadPrompts();
+    await renderPromptSources();
+  } catch (err) {
+    toast(err.message, "error");
+  } finally {
+    $("pl-sync").disabled = false;
+  }
+}
+
 /* ---------- profiles panel ---------- */
 
 function renderProfiles() {
@@ -554,7 +677,9 @@ async function init() {
   $("close-detail").addEventListener("click", closeDetail);
   $("detail-backdrop").addEventListener("click", closeDetail);
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeDetail();
+    if (e.key !== "Escape") return;
+    if (!$("prompt-library").classList.contains("hidden")) closePromptLibrary();
+    else closeDetail();
   });
   $("detail-stars").addEventListener("click", (e) => {
     const star = e.target.dataset.star;
@@ -582,6 +707,25 @@ async function init() {
   });
   $("use-as-reference").addEventListener("click", () => {
     if (CURRENT) referenceFrom(CURRENT);
+  });
+  $("open-prompt-library").addEventListener("click", openPromptLibrary);
+  $("pl-close").addEventListener("click", closePromptLibrary);
+  $("pl-sync").addEventListener("click", onPromptSync);
+  $("pl-search").addEventListener("change", loadPrompts);
+  $("pl-source-form").addEventListener("submit", onPromptSourceSubmit);
+  $("save-prompt").addEventListener("click", async () => {
+    if (!CURRENT || !CURRENT.prompt) return;
+    const title = window.prompt("收藏标题（中文，可留空自动截取）：") || "";
+    try {
+      await api("/api/prompts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title_zh: title, prompt: CURRENT.prompt, category: "我的收藏" }),
+      });
+      toast("已存入提示词库", "success");
+    } catch (err) {
+      toast(err.message, "error");
+    }
   });
   $("download-img").addEventListener("click", () => {
     if (CURRENT) downloadImage(CURRENT);

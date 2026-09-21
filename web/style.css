@@ -287,13 +287,91 @@ button:hover { border-color: var(--border-strong); }
 .stat-chip .lbl { font-size: 11px; color: var(--muted); letter-spacing: 1px; }
 .stat-models { font-size: 12px; color: var(--muted); }
 
+.gen-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 14px 0 6px;
+}
+.gen-group-head .gen-group-label { margin: 0; }
 .gen-group-label {
   display: block;
-  margin: 14px 0 6px;
   font-size: 11.5px;
   letter-spacing: 2.5px;
   color: var(--muted);
 }
+.btn-link {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 12.5px;
+  padding: 2px 6px;
+}
+.btn-link:hover { text-decoration: underline; }
+
+/* ---------- prompt library ---------- */
+
+#prompt-library {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(6, 9, 14, 0.62);
+  backdrop-filter: blur(4px);
+  overflow-y: auto;
+  padding: 40px 20px;
+}
+.pl-panel {
+  max-width: 980px;
+  margin: 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  animation: drawer-in 0.25s ease;
+}
+.pl-head { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+.pl-head h3 { margin: 0; font-size: 16px; letter-spacing: 2px; flex: 0 0 auto; }
+#pl-search { flex: 1; }
+.pl-cats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.pl-cats button {
+  padding: 4px 13px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--muted);
+  background: var(--input);
+}
+.pl-cats button.on { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.pl-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+.pl-card {
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.pl-card:hover { border-color: var(--accent); }
+.pl-title { font-weight: 600; font-size: 13.5px; margin-bottom: 6px; }
+.pl-text {
+  font-size: 12.5px;
+  color: var(--muted);
+  max-height: 92px;
+  overflow: hidden;
+  line-height: 1.5;
+}
+.pl-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.pl-del { font-size: 11.5px; padding: 2px 8px; }
 .gen-group-label:first-of-type { margin-top: 0; }
 
 kbd {

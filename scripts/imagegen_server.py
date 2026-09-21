@@ -78,6 +78,60 @@ def default_characters_path() -> Path:
     return Path.home() / ".codex" / "imagegen-characters.json"
 
 
+def default_prompts_path() -> Path:
+    env = os.environ.get("IMAGE_GEN_PROMPTS")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".codex" / "imagegen-prompts.json"
+
+
+BUILTIN_PROMPTS_PATH = Path(__file__).resolve().parents[1] / "data" / "prompts.json"
+
+
+def normalize_prompt_key(prompt: Any) -> str:
+    return re.sub(r"\s+", "", str(prompt).lower())[:80]
+
+
+def fetch_prompt_source(url: str, timeout: int = 30) -> str:
+    from urllib import request as urlrequest
+
+    req = urlrequest.Request(url, headers={"User-Agent": "imagegen-studio/1.0"})
+    with urlrequest.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def parse_prompt_source(raw: str, fmt: str) -> list[dict[str, Any]]:
+    """Normalize a synced source into prompt entries.
+
+    json: a top-level array (strings or objects with prompt/title/category/tags)
+    or an object with a "prompts" array. markdown: list/quote/numbered lines
+    with enough text to be a real prompt and no URL in the head.
+    """
+    entries: list[dict[str, Any]] = []
+    if fmt == "json":
+        data = json.loads(raw)
+        items = data if isinstance(data, list) else data.get("prompts", [])
+        for item in items:
+            if isinstance(item, str) and len(item.strip()) >= 24:
+                entries.append({"prompt": item.strip()})
+            elif isinstance(item, dict) and item.get("prompt"):
+                entries.append({
+                    "title_zh": item.get("title_zh") or item.get("title"),
+                    "prompt": str(item["prompt"]).strip(),
+                    "category": item.get("category"),
+                    "tags": item.get("tags") or [],
+                })
+    else:
+        for line in raw.splitlines():
+            stripped = line.strip()
+            if not (stripped.startswith(("- ", "* ", "> ")) or re.match(r"^\d+[.、]\s+", stripped)):
+                continue
+            text = re.sub(r"^[-*>\d]+[.、）)]?\s*", "", stripped).strip()
+            if len(text) >= 24 and "](http" not in text and not text.startswith("http"):
+                entries.append({"prompt": text})
+    return entries
+
+
 def load_json_file(path: Path, fallback: Any) -> Any:
     if not path.is_file():
         return fallback
@@ -377,11 +431,19 @@ class ProjectRequest(BaseModel):
     project: str = Field(max_length=60)
 
 
+class PromptRequest(BaseModel):
+    title_zh: str = Field(default="", max_length=60)
+    prompt: str = Field(min_length=8, max_length=4000)
+    category: str = Field(default="我的收藏", max_length=30)
+    tags: list[str] = Field(default=[])
+
+
 def create_app(
     library_root: Path | None = None,
     profiles_path: Path | None = None,
     token: str | None = None,
     characters_path: Path | None = None,
+    prompts_path: Path | None = None,
 ) -> FastAPI:
     library = (library_root or default_library()).expanduser().resolve()
     library.mkdir(parents=True, exist_ok=True)
@@ -481,6 +543,7 @@ def create_app(
         return job
 
     characters_file = (characters_path or default_characters_path()).expanduser().resolve()
+    prompts_file = (prompts_path or default_prompts_path()).expanduser().resolve()
 
     @app.get("/api/history")
     async def history(
@@ -603,6 +666,134 @@ def create_app(
             profiles["active"] = profiles["profiles"][0]["name"] if profiles["profiles"] else None
         save_profiles(profiles_file, profiles)
         return {"deleted": name, "profiles": masked_profiles(profiles)}
+
+    @app.get("/api/prompts")
+    async def list_prompts(
+        q: str | None = None,
+        category: str | None = None,
+        limit: int = Query(default=500, ge=1, le=5000),
+    ) -> dict[str, Any]:
+        builtin = load_json_file(BUILTIN_PROMPTS_PATH, {"prompts": [], "categories": []})
+        store = load_json_file(prompts_file, {"sources": [], "pulled": [], "custom": []})
+        merged = list(builtin.get("prompts", [])) + list(store.get("pulled", [])) + list(store.get("custom", []))
+        categories = list(builtin.get("categories", []))
+        for entry in merged:
+            cat = entry.get("category")
+            if cat and cat not in categories:
+                categories.append(cat)
+        if category:
+            merged = [p for p in merged if p.get("category") == category]
+        if q:
+            needle = q.lower()
+            merged = [
+                p for p in merged
+                if needle in (p.get("prompt") or "").lower()
+                or needle in (p.get("title_zh") or "").lower()
+                or any(needle in (tag or "").lower() for tag in (p.get("tags") or []))
+            ]
+        return {"total": len(merged), "categories": categories, "prompts": merged[:limit]}
+
+    @app.post("/api/prompts")
+    async def add_custom_prompt(payload: PromptRequest) -> dict[str, Any]:
+        store = load_json_file(prompts_file, {"schema_version": 1, "sources": [], "pulled": [], "custom": []})
+        custom = store.setdefault("custom", [])
+        key = normalize_prompt_key(payload.prompt)
+        if any(normalize_prompt_key(p.get("prompt")) == key for p in custom):
+            raise HTTPException(409, "这条提示词已在收藏里")
+        custom.append({
+            "id": f"custom-{uuid.uuid4().hex[:8]}",
+            "title_zh": payload.title_zh.strip() or payload.prompt[:24],
+            "prompt": payload.prompt.strip(),
+            "category": payload.category.strip() or "我的收藏",
+            "tags": payload.tags,
+            "source": "custom",
+        })
+        save_json_file(prompts_file, store)
+        return {"saved": True, "total_custom": len(custom)}
+
+    @app.delete("/api/prompts/{prompt_id}")
+    async def delete_prompt(prompt_id: str) -> dict[str, Any]:
+        store = load_json_file(prompts_file, {"schema_version": 1, "sources": [], "pulled": [], "custom": []})
+        removed = False
+        for key in ("custom", "pulled"):
+            entries = store.get(key, [])
+            filtered = [p for p in entries if p.get("id") != prompt_id]
+            if len(filtered) != len(entries):
+                store[key] = filtered
+                removed = True
+        if not removed:
+            raise HTTPException(404, "找不到该提示词（内置精选不可删除）")
+        save_json_file(prompts_file, store)
+        return {"deleted": prompt_id}
+
+    @app.get("/api/prompts/sources")
+    async def list_prompt_sources() -> dict[str, Any]:
+        store = load_json_file(prompts_file, {"schema_version": 1, "sources": [], "pulled": [], "custom": []})
+        return {"sources": store.get("sources", []), "pulled_count": len(store.get("pulled", []))}
+
+    @app.post("/api/prompts/sources")
+    async def add_prompt_source(
+        name: str = Form(...),
+        url: str = Form(...),
+        format: str = Form("markdown"),
+    ) -> dict[str, Any]:
+        name, url = name.strip(), url.strip()
+        if not name:
+            raise HTTPException(422, "源名称不能为空")
+        if not url.startswith(("https://raw.githubusercontent.com/", "https://github.com/", "http://127.0.0.1", "http://localhost")):
+            raise HTTPException(422, "URL 需是 GitHub raw 地址（或本地测试地址）")
+        if format not in ("json", "markdown"):
+            raise HTTPException(422, "格式仅支持 json / markdown")
+        store = load_json_file(prompts_file, {"schema_version": 1, "sources": [], "pulled": [], "custom": []})
+        sources = store.setdefault("sources", [])
+        if any(s.get("name") == name for s in sources):
+            raise HTTPException(409, f"源已存在: {name}")
+        sources.append({"name": name, "url": url, "format": format})
+        save_json_file(prompts_file, store)
+        return {"saved": name, "sources": sources}
+
+    @app.delete("/api/prompts/sources/{name}")
+    async def delete_prompt_source(name: str) -> dict[str, Any]:
+        store = load_json_file(prompts_file, {"schema_version": 1, "sources": [], "pulled": [], "custom": []})
+        sources = store.get("sources", [])
+        if not any(s.get("name") == name for s in sources):
+            raise HTTPException(404, f"源不存在: {name}")
+        store["sources"] = [s for s in sources if s.get("name") != name]
+        save_json_file(prompts_file, store)
+        return {"deleted": name}
+
+    @app.post("/api/prompts/sync")
+    async def sync_prompts() -> dict[str, Any]:
+        store = load_json_file(prompts_file, {"schema_version": 1, "sources": [], "pulled": [], "custom": []})
+        pulled = store.setdefault("pulled", [])
+        known = {normalize_prompt_key(p.get("prompt")) for p in pulled}
+        known |= {normalize_prompt_key(p.get("prompt")) for p in store.get("custom", [])}
+        report: dict[str, str] = {}
+        for src in store.get("sources", []):
+            name, url, fmt = src.get("name"), src.get("url"), src.get("format", "markdown")
+            try:
+                entries = parse_prompt_source(fetch_prompt_source(url), fmt)
+            except Exception as exc:  # noqa: BLE001 单源失败不阻断其他源
+                report[name] = f"失败: {exc}"
+                continue
+            added = 0
+            for entry in entries:
+                key = normalize_prompt_key(entry["prompt"])
+                if len(key) < 24 or key in known:
+                    continue
+                known.add(key)
+                pulled.append({
+                    "id": f"pulled-{name}-{uuid.uuid4().hex[:6]}",
+                    "title_zh": entry.get("title_zh") or entry["prompt"][:24],
+                    "prompt": entry["prompt"],
+                    "category": entry.get("category") or "拉取",
+                    "tags": entry.get("tags") or [name],
+                    "source": f"github:{name}",
+                })
+                added += 1
+            report[name] = f"+{added}"
+        save_json_file(prompts_file, store)
+        return {"synced": report, "total_pulled": len(pulled)}
 
     @app.post("/api/edit")
     async def edit_images(

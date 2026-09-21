@@ -419,5 +419,109 @@ class ImagegenServerTest(unittest.TestCase):
             self.assertNotIn("小说A", stats["by_project"])
 
 
+
+class _PromptFixtureHandler(BaseHTTPRequestHandler):
+    content = ""
+
+    def do_GET(self) -> None:
+        data = _PromptFixtureHandler.content.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *args: object) -> None:
+        return
+
+
+class PromptLibraryTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="imagegen-prompts-")).resolve()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.app = server_module.create_app(
+            library_root=self.tmpdir / "library",
+            profiles_path=self.tmpdir / "profiles.json",
+            prompts_path=self.tmpdir / "prompts-store.json",
+        )
+        self.client = TestClient(self.app)
+
+    def test_builtin_library_listed_with_categories(self) -> None:
+        data = self.client.get("/api/prompts").json()
+        self.assertGreaterEqual(data["total"], 72)
+        self.assertIn("人像写真", data["categories"])
+        self.assertIn("水彩手绘", data["categories"])
+        first = data["prompts"][0]
+        self.assertEqual(first["source"], "builtin")
+        self.assertGreater(len(first["prompt"]), 40)
+
+    def test_custom_prompt_add_search_delete(self) -> None:
+        added = self.client.post(
+            "/api/prompts",
+            json={"title_zh": "我的测试收藏", "prompt": "A custom test prompt about lighthouse at dusk, dramatic waves", "tags": ["测试"]},
+        )
+        self.assertEqual(added.status_code, 200, added.text)
+        duplicate = self.client.post(
+            "/api/prompts",
+            json={"title_zh": "重复", "prompt": "A custom test prompt about lighthouse at dusk, dramatic waves"},
+        )
+        self.assertEqual(duplicate.status_code, 409)
+
+        found = self.client.get("/api/prompts", params={"q": "lighthouse"}).json()
+        self.assertEqual(found["total"], 1)
+        entry = next(p for p in found["prompts"] if p["source"] == "custom")
+
+        # builtin entries cannot be deleted
+        self.assertEqual(self.client.delete("/api/prompts/builtin-001").status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/prompts/{entry['id']}").status_code, 200)
+        self.assertEqual(self.client.get("/api/prompts", params={"q": "lighthouse"}).json()["total"], 0)
+
+    def test_sync_pulls_sources_and_deduplicates(self) -> None:
+        markdown = chr(10).join([
+            "# 别人的提示词清单",
+            "- A misty lighthouse on a cliff at dawn, sea fog, cold blue palette",
+            "- [a link line](https://example.com) should be ignored",
+            "* Golden wheat field under storm light, dramatic clouds, wind motion",
+        ])
+        _PromptFixtureHandler.content = markdown
+        fixture_server = ThreadingHTTPServer(("127.0.0.1", 0), _PromptFixtureHandler)
+        threading.Thread(target=fixture_server.serve_forever, daemon=True).start()
+        self.addCleanup(lambda: (fixture_server.shutdown(), fixture_server.server_close()))
+        base = f"http://127.0.0.1:{fixture_server.server_address[1]}"
+
+        added = self.client.post(
+            "/api/prompts/sources",
+            data={"name": "testsrc", "url": f"{base}/prompts.md", "format": "markdown"},
+        )
+        self.assertEqual(added.status_code, 200, added.text)
+
+        synced = self.client.post("/api/prompts/sync").json()
+        self.assertEqual(synced["synced"]["testsrc"], "+2", synced)
+
+        data = self.client.get("/api/prompts", params={"category": "拉取"}).json()
+        self.assertEqual(data["total"], 2)
+        pulled = data["prompts"][0]
+        self.assertEqual(pulled["source"], "github:testsrc")
+
+        # second sync: all deduplicated
+        synced2 = self.client.post("/api/prompts/sync").json()
+        self.assertEqual(synced2["synced"]["testsrc"], "+0")
+
+    def test_markdown_and_json_parsers(self) -> None:
+        md = server_module.parse_prompt_source(
+            chr(10).join([
+                "- A cyberpunk street at night with neon rain and wet reflections, cinematic",
+                "short line",
+            ]),
+            "markdown",
+        )
+        self.assertEqual(len(md), 1)
+        js = server_module.parse_prompt_source(
+            '[{"prompt": "A glass bird sculpture, studio light", "title": "玻璃鸟"}]',
+            "json",
+        )
+        self.assertEqual(len(js), 1)
+        self.assertEqual(js[0]["title_zh"], "玻璃鸟")
+
 if __name__ == "__main__":
     unittest.main()
