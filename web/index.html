@@ -26,7 +26,6 @@
     </div>
     <div class="gen-group-head">
       <span class="gen-group-label">提示词</span>
-      <button id="open-prompt-library" type="button" class="btn-link">提示词库</button>
     </div>
     <textarea id="prompt" rows="6" placeholder="描述你想要的图片——一句中文口语也可以，我会先润色再生成；直接粘贴完整提示词则原样使用。"></textarea>
     <div id="edit-panel" class="hidden">
@@ -135,30 +134,6 @@
   </section>
 </main>
 
-<div id="prompt-library" class="hidden">
-  <div class="pl-panel">
-    <div class="pl-head">
-      <h3>提示词库</h3>
-      <input id="pl-search" placeholder="搜索标题 / 提示词 / 标签…">
-      <button id="pl-sync" type="button" title="拉取全部 GitHub 源并去重">同步</button>
-      <button id="pl-close" type="button" class="icon-btn">✕</button>
-    </div>
-    <div class="pl-cats" id="pl-cats"></div>
-    <div class="pl-list" id="pl-list"></div>
-    <details class="advanced">
-      <summary>GitHub 源管理</summary>
-      <div id="pl-sources-list"></div>
-      <form id="pl-source-form" class="field-row">
-        <label class="field">名称<input id="pl-src-name" required></label>
-        <label class="field">Raw URL<input id="pl-src-url" placeholder="https://raw.githubusercontent.com/..." required></label>
-        <label class="field">格式<select id="pl-src-format"><option value="markdown">markdown</option><option value="json">json</option></select></label>
-        <button type="submit" class="btn-small">添加</button>
-      </form>
-      <p class="muted">支持 JSON 数组或 markdown 清单；同步拉取全部源并按内容去重，内置精选不可删。</p>
-    </details>
-  </div>
-</div>
-
 <div id="detail-backdrop" class="hidden"></div>
 <aside id="detail" class="hidden">
   <button id="close-detail" type="button" class="icon-btn">✕</button>
@@ -178,7 +153,6 @@
       <button id="use-as-variant" type="button">以此发起变体</button>
       <button id="use-as-reference" type="button">用作参考</button>
       <button id="save-as-character" type="button">存为角色</button>
-      <button id="save-prompt" type="button">存提示词</button>
     </div>
     <div id="copy-hint" class="muted hidden">已复制到剪贴板</div>
   </div>

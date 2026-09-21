@@ -9,9 +9,6 @@ let MODE = "t2i";   // t2i | i2i
 let REF_FILES = []; // File objects awaiting upload
 let REF_PATHS = []; // library paths used as references
 let CHARACTERS = []; // character registry entries
-let PROMPTS = [];   // prompt library entries
-let PROMPT_CATS = []; // prompt categories
-let PL_CATEGORY = '';
 
 function esc(text) {
   const div = document.createElement("div");
@@ -467,157 +464,6 @@ async function copyText(text, hint) {
   setTimeout(() => $("copy-hint").classList.add("hidden"), 1500);
 }
 
-/* ---------- prompt library ---------- */
-
-async function loadPrompts() {
-  const params = new URLSearchParams();
-  if ($("pl-search").value.trim()) params.set("q", $("pl-search").value.trim());
-  if (PL_CATEGORY) params.set("category", PL_CATEGORY);
-  const data = await api(`/api/prompts?${params}`);
-  PROMPTS = data.prompts;
-  PROMPT_CATS = data.categories;
-  renderPromptLibrary();
-}
-
-function openPromptLibrary() {
-  $("prompt-library").classList.remove("hidden");
-  loadPrompts();
-  renderPromptSources();
-}
-
-function closePromptLibrary() {
-  $("prompt-library").classList.add("hidden");
-}
-
-const PL_GRADIENTS = [
-  ["#1e3a5f", "#38bdf8"], ["#312e81", "#818cf8"], ["#134e4a", "#2dd4bf"],
-  ["#1e293b", "#64748b"], ["#4c1d95", "#c084fc"], ["#0c4a6e", "#22d3ee"],
-  ["#3730a3", "#60a5fa"], ["#155e75", "#67e8f9"],
-];
-const PL_GLYPHS = ["✦", "◈", "◉", "◆", "▲", "●", "✧", "❖"];
-
-function placeholderThumb(id) {
-  let h = 0;
-  for (const ch of String(id || "")) h = (h * 31 + ch.codePointAt(0)) >>> 0;
-  const [c1, c2] = PL_GRADIENTS[h % PL_GRADIENTS.length];
-  const glyph = PL_GLYPHS[(h >>> 3) % PL_GLYPHS.length];
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 118">`
-    + `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">`
-    + `<stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs>`
-    + `<rect width="300" height="118" fill="url(#g)"/>`
-    + `<circle cx="${40 + (h % 120)}" cy="${20 + ((h >>> 4) % 60)}" r="52" fill="#fff" opacity="0.07"/>`
-    + `<circle cx="${180 + ((h >>> 6) % 90)}" cy="${60 + ((h >>> 8) % 50)}" r="34" fill="#fff" opacity="0.05"/>`
-    + `<text x="150" y="64" text-anchor="middle" font-size="30" fill="#fff" opacity="0.45">${glyph}</text>`
-    + `</svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
-function renderPromptLibrary() {
-  $("pl-cats").innerHTML = ["", ...PROMPT_CATS]
-    .map((c) => `<button type="button" class="${(PL_CATEGORY || "") === c ? "on" : ""}" data-cat="${esc(c)}">${c || "全部"}</button>`)
-    .join("");
-  for (const btn of document.querySelectorAll("#pl-cats button")) {
-    btn.addEventListener("click", () => {
-      PL_CATEGORY = btn.dataset.cat;
-      loadPrompts();
-    });
-  }
-  $("pl-list").innerHTML = PROMPTS.map((p) => {
-    const thumb = p.image
-      ? (String(p.image).startsWith("http")
-          ? p.image
-          : `/api/image?path=${encodeURIComponent(p.image)}`)
-      : placeholderThumb(p.id);
-    return `
-    <div class="pl-card" data-id="${esc(p.id)}">
-      <img class="pl-thumb" src="${esc(thumb)}" alt="" loading="lazy">
-      <div class="pl-title">${esc(p.title_zh || "")}</div>
-      <div class="pl-text">${esc(p.prompt)}</div>
-      <div class="pl-meta">
-        <span>${esc(p.category || "")} · ${esc((p.source || "").replace("builtin", "内置"))}</span>
-        ${p.source !== "builtin" ? `<button type="button" class="pl-del" data-del="${esc(p.id)}">删</button>` : ""}
-      </div>
-    </div>`;
-  }).join("");
-  for (const card of document.querySelectorAll(".pl-card")) {
-    card.addEventListener("click", (e) => {
-      if (e.target.closest(".pl-del")) return;
-      const entry = PROMPTS.find((x) => x.id === card.dataset.id);
-      if (!entry) return;
-      $("prompt").value = entry.prompt;
-      closePromptLibrary();
-      toast("已填入提示词", "success");
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    });
-  }
-  for (const del of document.querySelectorAll(".pl-del")) {
-    del.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      try {
-        await api(`/api/prompts/${encodeURIComponent(del.dataset.del)}`, { method: "DELETE" });
-        await loadPrompts();
-      } catch (err) {
-        toast(err.message, "error");
-      }
-    });
-  }
-}
-
-async function renderPromptSources() {
-  const data = await api("/api/prompts/sources");
-  const list = $("pl-sources-list");
-  list.innerHTML = data.sources.length
-    ? data.sources.map((s) => `
-      <div class="profile-row">
-        <span class="profile-name">${esc(s.name)}</span>
-        <span class="muted">${esc(s.url)} · ${esc(s.format)}</span>
-        <button type="button" data-del="${esc(s.name)}">删除</button>
-      </div>`).join("")
-    : '<p class="muted">还没有配置源——添加 GitHub raw 地址后点「同步」。</p>';
-  for (const btn of list.querySelectorAll("button[data-del]")) {
-    btn.addEventListener("click", async () => {
-      try {
-        await api(`/api/prompts/sources/${encodeURIComponent(btn.dataset.del)}`, { method: "DELETE" });
-        await renderPromptSources();
-      } catch (err) {
-        toast(err.message, "error");
-      }
-    });
-  }
-}
-
-async function onPromptSourceSubmit(e) {
-  e.preventDefault();
-  const form = new FormData();
-  form.append("name", $("pl-src-name").value.trim());
-  form.append("url", $("pl-src-url").value.trim());
-  form.append("format", $("pl-src-format").value);
-  try {
-    await api("/api/prompts/sources", { method: "POST", body: form });
-    $("pl-src-name").value = "";
-    $("pl-src-url").value = "";
-    await renderPromptSources();
-    toast("源已添加，点「同步」拉取", "success");
-  } catch (err) {
-    toast(err.message, "error");
-  }
-}
-
-async function onPromptSync() {
-  $("pl-sync").disabled = true;
-  try {
-    const result = await api("/api/prompts/sync", { method: "POST" });
-    const parts = Object.entries(result.synced).map(([k, v]) => `${k} ${v}`);
-    toast(parts.length ? `同步完成：${parts.join("，")}` : "没有配置源，先添加 GitHub 源", parts.length ? "success" : "error");
-    await loadPrompts();
-    await renderPromptSources();
-  } catch (err) {
-    toast(err.message, "error");
-  } finally {
-    $("pl-sync").disabled = false;
-  }
-}
-
 /* ---------- profiles panel ---------- */
 
 function renderProfiles() {
@@ -709,8 +555,7 @@ async function init() {
   $("detail-backdrop").addEventListener("click", closeDetail);
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    if (!$("prompt-library").classList.contains("hidden")) closePromptLibrary();
-    else closeDetail();
+    closeDetail();
   });
   $("detail-stars").addEventListener("click", (e) => {
     const star = e.target.dataset.star;
@@ -738,25 +583,6 @@ async function init() {
   });
   $("use-as-reference").addEventListener("click", () => {
     if (CURRENT) referenceFrom(CURRENT);
-  });
-  $("open-prompt-library").addEventListener("click", openPromptLibrary);
-  $("pl-close").addEventListener("click", closePromptLibrary);
-  $("pl-sync").addEventListener("click", onPromptSync);
-  $("pl-search").addEventListener("change", loadPrompts);
-  $("pl-source-form").addEventListener("submit", onPromptSourceSubmit);
-  $("save-prompt").addEventListener("click", async () => {
-    if (!CURRENT || !CURRENT.prompt) return;
-    const title = window.prompt("收藏标题（中文，可留空自动截取）：") || "";
-    try {
-      await api("/api/prompts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title_zh: title, prompt: CURRENT.prompt, category: "我的收藏" }),
-      });
-      toast("已存入提示词库", "success");
-    } catch (err) {
-      toast(err.message, "error");
-    }
   });
   $("download-img").addEventListener("click", () => {
     if (CURRENT) downloadImage(CURRENT);
