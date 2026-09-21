@@ -301,13 +301,18 @@ button:hover { border-color: var(--border-strong); }
   color: var(--muted);
 }
 .btn-link {
-  background: transparent;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
   color: var(--accent);
   font-size: 12.5px;
-  padding: 2px 6px;
+  padding: 3px 12px;
+  border-radius: 999px;
 }
-.btn-link:hover { text-decoration: underline; }
+.btn-link::before { content: "◈ "; font-size: 11px; }
+.btn-link:hover { box-shadow: 0 0 14px rgba(56, 189, 248, 0.25); }
 
 /* ---------- prompt library ---------- */
 
