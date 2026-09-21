@@ -28,6 +28,10 @@ python scripts/imagegen_server.py          # → http://127.0.0.1:8642
 
 服务端按以下顺序寻找引擎：`IMAGE_GEN_CLI` 环境变量 → 仓库同级目录 `image-gen/` → 已安装的 skill 目录（`~/.agents/skills` 等）。
 
+### 提示词库
+
+生成面板的「提示词库」按钮打开三层库：**内置精选**（随仓库的 72 条手写英文提示词，8 个中文分类）+ **GitHub 源同步**（在弹层的源管理里添加 raw 地址，支持 markdown 清单和 JSON 数组，`![配图](url)` 行自动挂到相邻提示词上，内容去重）+ **个人收藏**（图库详情「存提示词」）。格式活样例见 [data/sample-source.md](data/sample-source.md)——它本身就是一个可直接添加的源。
+
 ### 配置文件
 
 多网关 profile 存于 `~/.codex/imagegen-profiles.json`：

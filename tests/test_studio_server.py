@@ -479,6 +479,7 @@ class PromptLibraryTest(unittest.TestCase):
     def test_sync_pulls_sources_and_deduplicates(self) -> None:
         markdown = chr(10).join([
             "# 别人的提示词清单",
+            "![配图](https://example.com/lighthouse.jpg)",
             "- A misty lighthouse on a cliff at dawn, sea fog, cold blue palette",
             "- [a link line](https://example.com) should be ignored",
             "* Golden wheat field under storm light, dramatic clouds, wind motion",
@@ -500,8 +501,11 @@ class PromptLibraryTest(unittest.TestCase):
 
         data = self.client.get("/api/prompts", params={"category": "拉取"}).json()
         self.assertEqual(data["total"], 2)
-        pulled = data["prompts"][0]
+        pulled = next(p for p in data["prompts"] if "lighthouse" in (p["prompt"] or "").lower())
         self.assertEqual(pulled["source"], "github:testsrc")
+        self.assertEqual(pulled["image"], "https://example.com/lighthouse.jpg")
+        wheat = next(p for p in data["prompts"] if "wheat" in (p["prompt"] or "").lower())
+        self.assertIsNone(wheat["image"])
 
         # second sync: all deduplicated
         synced2 = self.client.post("/api/prompts/sync").json()
@@ -510,12 +514,14 @@ class PromptLibraryTest(unittest.TestCase):
     def test_markdown_and_json_parsers(self) -> None:
         md = server_module.parse_prompt_source(
             chr(10).join([
+                "![封面](https://img.example/cover.png)",
                 "- A cyberpunk street at night with neon rain and wet reflections, cinematic",
                 "short line",
             ]),
             "markdown",
         )
         self.assertEqual(len(md), 1)
+        self.assertEqual(md[0]["image"], "https://img.example/cover.png")
         js = server_module.parse_prompt_source(
             '[{"prompt": "A glass bird sculpture, studio light", "title": "玻璃鸟"}]',
             "json",

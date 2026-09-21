@@ -123,13 +123,26 @@ def parse_prompt_source(raw: str, fmt: str) -> list[dict[str, Any]]:
                     "image": item.get("image"),
                 })
     else:
+        pending_image: str | None = None
         for line in raw.splitlines():
             stripped = line.strip()
+            image_match = re.search(r"!\[[^\]]*\]\((https?://[^)\s]+)\)", stripped) or re.search(
+                r'<img[^>]+src="(https?://[^"\s]+)"', stripped
+            )
+            if image_match:
+                image_url = image_match.group(1)
+                if "badge" not in image_url and "shields.io" not in image_url:
+                    pending_image = image_url
+                continue
             if not (stripped.startswith(("- ", "* ", "> ")) or re.match(r"^\d+[.、]\s+", stripped)):
                 continue
             text = re.sub(r"^[-*>\d]+[.、）)]?\s*", "", stripped).strip()
             if len(text) >= 24 and "](http" not in text and not text.startswith("http"):
-                entries.append({"prompt": text})
+                entry: dict[str, Any] = {"prompt": text}
+                if pending_image:
+                    entry["image"] = pending_image
+                    pending_image = None
+                entries.append(entry)
     return entries
 
 
@@ -804,6 +817,7 @@ def create_app(
                     "category": entry.get("category") or "拉取",
                     "tags": entry.get("tags") or [name],
                     "source": f"github:{name}",
+                    "image": entry.get("image"),
                 })
                 added += 1
             report[name] = f"+{added}"
