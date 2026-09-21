@@ -646,7 +646,7 @@ def create_app(
         args = [sys.executable, str(resolve_cli()), "edit", "--prompt", prompt, "--output", str(output)]
         for ref in refs:
             args += ["--image", str(ref)]
-        if choice:
+        if choice and not model:
             args += ["--choice", choice]
         if model:
             args += ["--model", model]
