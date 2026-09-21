@@ -47,6 +47,21 @@ key 永不出现在任何 API 响应中；更新 profile 时 key 留空即保留
 
 设 `IMAGE_GEN_TOKEN=<随机串>`（或 `--token`）启用认证——客户端需带 `X-Auth-Token` 头或 `?token=` 参数；图库目录用 `IMAGE_GEN_LIBRARY` 指定；建议置于反向代理（HTTPS）之后。完整步骤（systemd / Docker / Caddy-Nginx 反代 / 安全清单）见 [DEPLOY.md](DEPLOY.md)。本地 Windows 双击 `start.bat` 即可启动。
 
+### 备份
+
+图库（图片 + sidecar 账本 + references）是不可再生的资产，建议定期快照：
+
+```bash
+python scripts/backup_library.py --dest D:/backups            # 快照到 D:/backups/imagegen-backup-<时间戳>
+python scripts/backup_library.py --dest D:/backups --days 30  # 保留最近 30 份，旧快照自动清理
+```
+
+Windows 计划任务每天 03:30 执行：
+
+```bat
+schtasks /create /tn imagegen-backup /sc daily /st 03:30 /tr "python D:\code\imagegen-studio\scripts\backup_library.py --dest D:\backups"
+```
+
 ## 开发
 
 ```bash
