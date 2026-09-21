@@ -243,6 +243,10 @@ class JobManager:
                 job["status"] = "error"
                 job["error"] = {"category": "timeout", "summary": "生成超过 15 分钟被终止。"}
                 return
+            except Exception as exc:  # noqa: BLE001 启动失败（命令行过长/CLI 缺失等）不得让任务悬挂
+                job["status"] = "error"
+                job["error"] = {"category": "spawn", "summary": f"生成进程启动失败：{exc}"}
+                return
             finally:
                 job["elapsed"] = round(time.time() - started, 1)
         if proc.returncode == 0:
@@ -264,10 +268,17 @@ class JobManager:
                 job["status"] = "error"
                 job["error"] = {"category": "parse", "summary": proc.stdout[-400:] or "空输出"}
         else:
+            tail = (proc.stderr or proc.stdout)[-400:]
             try:
                 job["error"] = json.loads(proc.stderr)
-            except json.JSONDecodeError:
-                job["error"] = {"category": "unknown", "summary": (proc.stderr or proc.stdout)[-400:]}
+            except (json.JSONDecodeError, TypeError):
+                if "JSONDecodeError" in tail or "Expecting value" in tail:
+                    job["error"] = {
+                        "category": "gateway",
+                        "summary": "网关返回了无法解析的响应（可能是短暂故障），请稍后重试。\n" + tail,
+                    }
+                else:
+                    job["error"] = {"category": "cli", "summary": tail}
             job["status"] = "error"
 
     def get(self, job_id: str) -> dict[str, Any] | None:
@@ -371,7 +382,7 @@ def build_reproduce_command(record: dict[str, Any]) -> str:
 
 
 class GenerateRequest(BaseModel):
-    prompt: str = Field(min_length=1)
+    prompt: str = Field(min_length=1, max_length=4000)
     choice: int | None = None
     model: str | None = None
     preset: str | None = None
@@ -655,6 +666,8 @@ def create_app(
         prompt = prompt.strip()
         if not prompt:
             raise HTTPException(422, "先写修改指令")
+        if len(prompt) > 4000:
+            raise HTTPException(422, "修改指令过长（上限 4000 字符）")
         refs: list[Path] = []
         for path_text in image_paths:
             ref = confine(path_text)

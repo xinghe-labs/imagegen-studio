@@ -131,7 +131,41 @@ class ImagegenServerTest(unittest.TestCase):
         self.assertIn("quality", data["presets"])
         self.assertEqual(len(data["profiles"]), 1)
         self.assertTrue(data["profiles"][0]["has_key"])
+        self.assertTrue(data["credentials"])
         self.assertNotIn("provider-secret-studio", response.text)
+
+    def test_meta_credentials_false_without_any_key_source(self) -> None:
+        for key in ("IMAGE_GENERATION_API_KEY", "GPT_IMAGE_API_KEY", "OPENAI_API_KEY"):
+            os.environ.pop(key, None)
+        self.profiles.write_text(json.dumps({"profiles": [], "active": None}), encoding="utf-8")
+        data = self.client.get("/api/meta").json()
+        self.assertFalse(data["credentials"])
+
+    def test_generate_rejects_overlong_prompt(self) -> None:
+        response = self.client.post(
+            "/api/generate",
+            json={"prompt": "x" * 4001},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertIn("4000", response.text)
+
+    def test_spawn_failure_marks_job_error_not_hang(self) -> None:
+        # 进程启动抛错（如命令行过长）必须让 job 尽快进入 error，而不是永久 running。
+        from unittest import mock
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise OSError("command line too long")
+
+        with mock.patch.object(server_module.subprocess, "run", side_effect=boom):
+            created = self.client.post(
+                "/api/generate",
+                json={"prompt": "spawn boom", "preset": "fast"},
+            )
+            self.assertEqual(created.status_code, 200, created.text)
+            job = poll_job(self.client, created.json()["job_id"])
+            self.assertEqual(job["status"], "error")
+            self.assertEqual(job["error"]["category"], "spawn")
+            self.assertIn("command line too long", job["error"]["summary"])
 
     def test_generate_end_to_end_and_history(self) -> None:
         response = {"data": [{"b64_json": ONE_PIXEL_PNG_B64}]}
