@@ -48,6 +48,7 @@ function toast(message, type = "info") {
 
 async function loadMeta() {
   META = await api("/api/meta");
+  if ($("cred-hint")) $("cred-hint").classList.toggle("hidden", Boolean(META.credentials));
   $("library-path").textContent = META.library;
   const profileSelect = $("profile-select");
   profileSelect.innerHTML = "";

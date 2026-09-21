@@ -475,6 +475,7 @@ def create_app(
                 for p in profiles.get("profiles", [])
             ],
             "active": profile.get("name") if profile else None,
+            "credentials": has_gateway_credentials(profile),
             "models": load_catalog_models(base_url),
         }
 
