@@ -299,7 +299,7 @@ def build_generate_args(payload: dict[str, Any], library: Path) -> list[str]:
         "--prompt", payload["prompt"],
         "--output", str(output),
     ]
-    if payload.get("choice") is not None:
+    if payload.get("choice") is not None and not payload.get("model"):
         args += ["--choice", str(payload["choice"])]
     if payload.get("preset"):
         args += ["--preset", payload["preset"]]
