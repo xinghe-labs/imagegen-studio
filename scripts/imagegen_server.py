@@ -71,13 +71,6 @@ def default_profiles_path() -> Path:
     return Path.home() / ".codex" / "imagegen-profiles.json"
 
 
-def default_characters_path() -> Path:
-    env = os.environ.get("IMAGE_GEN_CHARACTERS")
-    if env:
-        return Path(env).expanduser()
-    return Path.home() / ".codex" / "imagegen-characters.json"
-
-
 def load_json_file(path: Path, fallback: Any) -> Any:
     if not path.is_file():
         return fallback
@@ -322,7 +315,6 @@ def scan_history(library: Path) -> list[dict[str, Any]]:
                 "parameters": record.get("parameters", {}),
                 "choice": record.get("choice"),
                 "project": record.get("project"),
-                "character": record.get("character"),
                 "record_type": record.get("record_type"),
             }
         )
@@ -391,7 +383,6 @@ class GenerateRequest(BaseModel):
     resolution: str | None = None
     n: int = Field(default=1, ge=1, le=4)
     profile: str | None = None
-    character: str | None = None
     project: str | None = None
 
 
@@ -408,12 +399,6 @@ class ActivateRequest(BaseModel):
     name: str
 
 
-class CharacterRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    from_image: str | None = None
-    identity_block: str | None = Field(default=None, max_length=2000)
-
-
 class ProjectRequest(BaseModel):
     image: str
     project: str = Field(max_length=60)
@@ -424,7 +409,6 @@ def create_app(
     library_root: Path | None = None,
     profiles_path: Path | None = None,
     token: str | None = None,
-    characters_path: Path | None = None,
 ) -> FastAPI:
     library = (library_root or default_library()).expanduser().resolve()
     library.mkdir(parents=True, exist_ok=True)
@@ -500,18 +484,6 @@ def create_app(
                 child_env["IMAGE_GENERATION_BASE_URL"] = str(profile["base_url"])
         payload_dict = payload.model_dump(exclude={"profile"})
         annotate: dict[str, Any] = {}
-        if payload_dict.get("character"):
-            characters = load_json_file(characters_file, {"characters": []})
-            entry = next(
-                (c for c in characters.get("characters", []) if c.get("name") == payload_dict["character"]),
-                None,
-            )
-            if entry is None:
-                raise HTTPException(404, f"角色不存在: {payload_dict['character']}")
-            identity = (entry.get("identity_block") or "").strip()
-            if identity:
-                payload_dict["prompt"] = f"{identity}, {payload_dict['prompt']}"
-            annotate["character"] = payload_dict["character"]
         if payload_dict.get("project"):
             annotate["project"] = payload_dict["project"]
         args = build_generate_args(payload_dict, library)
@@ -525,7 +497,6 @@ def create_app(
             raise HTTPException(404, "job 不存在")
         return job
 
-    characters_file = (characters_path or default_characters_path()).expanduser().resolve()
 
     @app.get("/api/history")
     async def history(
@@ -713,69 +684,6 @@ def create_app(
                 child_env["IMAGE_GENERATION_BASE_URL"] = str(profile_entry["base_url"])
         job_id = jobs.create(args, child_env, library, annotate={"project": project} if project.strip() else None)
         return {"job_id": job_id, "status": "queued"}
-
-    @app.get("/api/characters")
-    async def list_characters() -> dict[str, Any]:
-        data = load_json_file(characters_file, {"characters": []})
-        entries = []
-        for c in data.get("characters", []):
-            entries.append(
-                {
-                    "name": c.get("name"),
-                    "identity_block": c.get("identity_block"),
-                    "reference_image": c.get("reference_image"),
-                    "has_reference": bool(c.get("reference_image") and Path(c["reference_image"]).is_file()),
-                    "created_at": c.get("created_at"),
-                }
-            )
-        return {"characters": entries}
-
-    @app.post("/api/characters")
-    async def upsert_character(payload: CharacterRequest) -> dict[str, Any]:
-        name = payload.name.strip()
-        if not name:
-            raise HTTPException(422, "角色名不能为空")
-        identity = (payload.identity_block or "").strip()
-        reference: str | None = None
-        if payload.from_image:
-            image_path = confine(payload.from_image)
-            sidecar_path = Path(str(image_path) + ".json")
-            if not sidecar_path.is_file():
-                raise HTTPException(404, "找不到该图的 sidecar，无法提取身份块")
-            record = json.loads(sidecar_path.read_text(encoding="utf-8"))
-            if not identity:
-                identity = (record.get("prompt") or "").strip()
-            reference = str(image_path)
-        if not identity:
-            raise HTTPException(422, "身份块为空：填 identity_block 或提供 from_image 提取")
-        characters = load_json_file(characters_file, {"characters": []})
-        entries = characters.setdefault("characters", [])
-        existing = next((c for c in entries if c.get("name") == name), None)
-        if existing:
-            existing["identity_block"] = identity
-            if reference:
-                existing["reference_image"] = reference
-        else:
-            entry: dict[str, Any] = {
-                "name": name,
-                "identity_block": identity,
-                "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-            }
-            if reference:
-                entry["reference_image"] = reference
-            entries.append(entry)
-        save_json_file(characters_file, characters)
-        return {"saved": name}
-
-    @app.delete("/api/characters/{name}")
-    async def delete_character(name: str) -> dict[str, Any]:
-        characters = load_json_file(characters_file, {"characters": []})
-        entries = characters.get("characters", [])
-        if name not in [c.get("name") for c in entries]:
-            raise HTTPException(404, f"角色不存在: {name}")
-        characters["characters"] = [c for c in entries if c.get("name") != name]
-        save_json_file(characters_file, characters)
-        return {"deleted": name}
 
     @app.post("/api/project")
     async def set_project(payload: ProjectRequest) -> dict[str, Any]:

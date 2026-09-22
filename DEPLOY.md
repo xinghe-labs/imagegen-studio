@@ -68,7 +68,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now imagegen-studio
 # 引擎放同级目录
 git clone https://github.com/xinghe-labs/image-gen.git ../image-gen
 
-# 服务端配置（catalog/profiles/characters 挂载到容器 /root/.codex）
+# 服务端配置（catalog/profiles 挂载到容器 /root/.codex）
 mkdir -p config library
 # 编辑 config/imagegen-profiles.json（见 README）
 

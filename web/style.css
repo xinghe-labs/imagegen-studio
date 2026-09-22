@@ -565,7 +565,7 @@ kbd {
 .toast-error { border-left-color: var(--danger); }
 .toast-success { border-left-color: var(--accent); }
 
-/* ---------- profile / character rows ---------- */
+/* ---------- profile rows ---------- */
 
 .profile-row {
   display: flex; align-items: center; gap: 10px;
@@ -575,7 +575,7 @@ kbd {
 }
 .profile-name { font-weight: 600; min-width: 80px; }
 .profile-row button { padding: 3px 11px; font-size: 12px; }
-#profile-form input, #character-form input { min-width: 130px; }
+#profile-form input { min-width: 130px; }
 
 /* ---------- responsive ---------- */
 

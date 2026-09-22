@@ -74,7 +74,6 @@
       </div>
     </div>
     <div class="field-row">
-      <label class="field">角色<select id="character"><option value="">不使用角色档案</option></select></label>
       <label class="field">项目<input id="project" placeholder="归类用途，如：继承人封面"></label>
     </div>
     <details class="advanced">
@@ -95,16 +94,6 @@
         <button type="submit" class="btn-small">保存</button>
       </form>
       <p class="muted">key 只存在本机服务端配置文件里，页面永不回传。</p>
-    </details>
-    <details class="advanced">
-      <summary>角色一致性档案</summary>
-      <div id="characters-list"></div>
-      <form id="character-form" class="field-row">
-        <label class="field">角色名<input id="ch-name" placeholder="如 林德生" required></label>
-        <label class="field">身份块（英文）<input id="ch-identity" placeholder="留空 = 从图库详情提取"></label>
-        <button type="submit" class="btn-small">保存</button>
-      </form>
-      <p class="muted">生成时选中角色会把身份块自动拼进提示词；图生图模式未传参考图时自动带其参考图。</p>
     </details>
     <div id="latest"></div>
     </div>
@@ -154,7 +143,6 @@
       <button id="open-folder" type="button">打开文件夹</button>
       <button id="use-as-variant" type="button">以此发起变体</button>
       <button id="use-as-reference" type="button">用作参考</button>
-      <button id="save-as-character" type="button">存为角色</button>
     </div>
     <div id="copy-hint" class="muted hidden">已复制到剪贴板</div>
   </div>

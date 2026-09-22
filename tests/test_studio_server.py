@@ -187,15 +187,11 @@ class ImagegenServerTest(unittest.TestCase):
             self.assertEqual(job["error"]["category"], "gateway")
             self.assertIn("请稍后重试", job["error"]["summary"])
 
-    def test_choice_and_character_lengths_validated(self) -> None:
+    def test_choice_bounds_validated(self) -> None:
         over_choice = self.client.post("/api/generate", json={"prompt": "ok", "choice": 11})
         self.assertEqual(over_choice.status_code, 422)
         under_choice = self.client.post("/api/generate", json={"prompt": "ok", "choice": 0})
         self.assertEqual(under_choice.status_code, 422)
-        long_name = self.client.post(
-            "/api/characters", json={"name": "x" * 101, "identity_block": "y" * 2010}
-        )
-        self.assertEqual(long_name.status_code, 422)
 
     def test_generate_end_to_end_and_history(self) -> None:
         response = {"data": [{"b64_json": ONE_PIXEL_PNG_B64}]}
@@ -461,54 +457,6 @@ class ImagegenServerTest(unittest.TestCase):
             data={"prompt": "sneaky", "image_paths": str(outside)},
         )
         self.assertEqual(response.status_code, 403)
-
-    def test_character_lifecycle_and_generation_annotation(self) -> None:
-        response = {"data": [{"b64_json": ONE_PIXEL_PNG_B64}]}
-        with FakeImageServer([(200, response), (200, response)]) as gateway:
-            self.profiles.write_text(
-                json.dumps({
-                    "profiles": [{"name": "test", "base_url": gateway.base_url, "api_key": "provider-secret-studio"}],
-                    "active": "test",
-                }),
-                encoding="utf-8",
-            )
-            first = poll_job(
-                self.client,
-                self.client.post("/api/generate", json={"prompt": "studio test cat"}).json()["job_id"],
-            )
-            self.assertEqual(first["status"], "done", first)
-            anchor = first["result"]["saved"][0]
-
-            saved = self.client.post(
-                "/api/characters",
-                json={"name": "主角", "from_image": anchor},
-            )
-            self.assertEqual(saved.status_code, 200, saved.text)
-            characters = self.client.get("/api/characters").json()["characters"]
-            self.assertEqual(len(characters), 1)
-            self.assertEqual(characters[0]["identity_block"], "studio test cat")
-            self.assertTrue(characters[0]["has_reference"])
-
-            second = poll_job(
-                self.client,
-                self.client.post(
-                    "/api/generate",
-                    json={"prompt": "in the rain", "character": "主角", "project": "小说A"},
-                ).json()["job_id"],
-            )
-            self.assertEqual(second["status"], "done", second)
-            history = self.client.get("/api/history").json()
-            record = next(r for r in history["records"] if r["character"] == "主角")
-            self.assertTrue((record["prompt"] or "").startswith("studio test cat"))
-            self.assertIn("in the rain", record["prompt"])
-            self.assertEqual(record["project"], "小说A")
-
-            deleted = self.client.delete("/api/characters/主角")
-            self.assertEqual(deleted.status_code, 200)
-            missing = self.client.post(
-                "/api/generate", json={"prompt": "x", "character": "主角"}
-            )
-            self.assertEqual(missing.status_code, 404)
 
     def test_stats_and_project_filtering(self) -> None:
         response = {"data": [{"b64_json": ONE_PIXEL_PNG_B64}]}
