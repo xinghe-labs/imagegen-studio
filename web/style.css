@@ -532,8 +532,6 @@ kbd {
 .detail-actions button { font-size: 13px; padding: 7px 12px; }
 .btn-small { font-size: 13px; padding: 7px 14px; }
 
-#copy-hint { margin-top: 10px; color: var(--accent); }
-
 /* ---------- toasts ---------- */
 
 #toast-box {

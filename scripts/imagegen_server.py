@@ -354,23 +354,6 @@ def build_generate_args(payload: dict[str, Any], library: Path) -> list[str]:
     return args
 
 
-def build_reproduce_command(record: dict[str, Any]) -> str:
-    parts = ["python scripts/image_gen.py generate"]
-    prompt = (record.get("prompt") or "").replace('"', '\\"')
-    parts.append(f'--prompt "{prompt}"')
-    if record.get("model"):
-        parts.append(f"--model {record['model']}")
-    params = record.get("parameters") or {}
-    for key, flag in (
-        ("preset", "--preset"), ("size", "--size"), ("quality", "--quality"),
-        ("output_format", "--format"), ("aspect_ratio", "--aspect-ratio"),
-        ("resolution", "--resolution"),
-    ):
-        if params.get(key):
-            parts.append(f"{flag} {params[key]}")
-    return " ".join(parts)
-
-
 class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
     choice: int | None = Field(default=None, ge=1, le=10)
@@ -543,15 +526,6 @@ def create_app(
         record["rating"] = payload.rating
         save_json_file(sidecar_path, record)
         return {"image": str(image_path), "rating": payload.rating}
-
-    @app.post("/api/reproduce")
-    async def reproduce(payload: PathRequest) -> dict[str, str]:
-        image_path = confine(payload.image)
-        sidecar_path = Path(str(image_path) + ".json")
-        if not sidecar_path.is_file():
-            raise HTTPException(404, "找不到 sidecar")
-        record = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        return {"command": build_reproduce_command(record)}
 
     @app.post("/api/open")
     async def open_folder(payload: PathRequest) -> dict[str, str]:

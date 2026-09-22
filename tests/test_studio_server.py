@@ -273,27 +273,6 @@ class ImagegenServerTest(unittest.TestCase):
         self.assertEqual(history["total"], 1)
         self.assertEqual(history["records"][0]["prompt"], "legacy record")
 
-    def test_reproduce_command_uses_record(self) -> None:
-        response = {"data": [{"b64_json": ONE_PIXEL_PNG_B64}]}
-        with FakeImageServer([(200, response)]) as gateway:
-            self.profiles.write_text(
-                json.dumps({
-                    "profiles": [{"name": "test", "base_url": gateway.base_url, "api_key": "provider-secret-studio"}],
-                    "active": "test",
-                }),
-                encoding="utf-8",
-            )
-            job = poll_job(
-                self.client,
-                self.client.post("/api/generate", json={"prompt": "reproduce me", "preset": "quality"}).json()["job_id"],
-            )
-            self.assertEqual(job["status"], "done", job)
-            image = job["result"]["saved"][0]
-            command = self.client.post("/api/reproduce", json={"image": image}).json()["command"]
-            self.assertIn("--model gpt-image-2", command)
-            self.assertIn('--prompt "reproduce me"', command)
-            self.assertIn("--preset quality", command)
-
     def test_meta_works_without_any_profiles_file(self) -> None:
         # Regression: zero-config machines have no profiles file; /api/meta
         # must still return 200 so the UI initializes.

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/xinghe-labs/imagegen-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/xinghe-labs/imagegen-studio/actions/workflows/ci.yml)
 
-本地优先的**生图工作台**：生成器为主的中文 Web 界面，跑在 [image-gen](https://github.com/xinghe-labs/image-gen) 引擎上。输入一句提示词（中文口语也行），润色、生成、收藏、复现、变体，一站完成；agent 通道与命令行共用同一份账本，互不干扰。
+本地优先的**生图工作台**：生成器为主的中文 Web 界面，跑在 [image-gen](https://github.com/xinghe-labs/image-gen) 引擎上。输入一句提示词（中文口语也行），润色、生成、收藏、变体，一站完成；agent 通道与命令行共用同一份账本，互不干扰。
 
 ## 截图
 
@@ -13,7 +13,6 @@
 - **文生图** — 提示词 + 模型（编号目录）+ 预设/自定义尺寸 + 1-4 张批量，任务进度实时显示
 - **图生图** — 上传 1-4 张参考图（或从图库一键「用作参考」），描述修改方向
 - **图库** — sidecar 账本驱动的历史网格：按模型/关键词筛选、只看收藏、★评分写回记录
-- **复现** — 每张图自带完整参数（prompt/模型/参数/SHA-256），一键复制复现命令
 - **多网关配置** — 多套 `{名称, Base URL, API Key}` 一键切换；key 只存服务端配置文件，页面永不回传
 - **认证预留** — 设 `IMAGE_GEN_TOKEN` 即启用访问令牌，为服务器部署零返工
 

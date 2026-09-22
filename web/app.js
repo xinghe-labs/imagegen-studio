@@ -412,13 +412,6 @@ function closeLightbox() {
   $("lightbox-img").src = "";
 }
 
-async function copyText(text, hint) {
-  await navigator.clipboard.writeText(text);
-  $("copy-hint").textContent = hint || "已复制到剪贴板";
-  $("copy-hint").classList.remove("hidden");
-  setTimeout(() => $("copy-hint").classList.add("hidden"), 1500);
-}
-
 /* ---------- profiles panel ---------- */
 
 function renderProfiles() {
@@ -515,18 +508,6 @@ async function init() {
   $("lightbox-close").addEventListener("click", closeLightbox);
   $("lightbox").addEventListener("click", (e) => {
     if (e.target === $("lightbox")) closeLightbox();
-  });
-  $("lightbox-download").addEventListener("click", () => {
-    if (CURRENT) downloadImage(CURRENT);
-  });
-  $("copy-cmd").addEventListener("click", async () => {
-    if (!CURRENT) return;
-    const { command } = await api("/api/reproduce", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image: CURRENT.image }),
-    });
-    await copyText(command, "复现命令已复制");
   });
   $("open-folder").addEventListener("click", async () => {
     if (!CURRENT) return;
