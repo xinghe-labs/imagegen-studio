@@ -85,11 +85,21 @@ python scripts/backup_library.py --dest D:/backups            # 快照到 D:/bac
 python scripts/backup_library.py --dest D:/backups --days 30  # 保留最近 30 份，旧快照自动清理
 ```
 
-Windows 计划任务每天 03:30 执行：
+注册每日自动备份（Windows 计划任务；其他平台会打印对应的 cron 行）：
 
-```bat
-schtasks /create /tn imagegen-backup /sc daily /st 03:30 /tr "python D:\code\imagegen-studio\scripts\backup_library.py --dest D:\backups"
+```bash
+python scripts/install_backup_task.py --dest D:\backups --days 14 --time 03:30
+python scripts/install_backup_task.py --remove       # 移除任务
 ```
+
+### 登录自启（Windows）
+
+```bash
+python scripts/install_autostart.py            # 启动文件夹写入快捷方式（免管理员权限）
+python scripts/install_autostart.py --remove   # 卸载
+```
+
+在「启动」文件夹生成指向 `pythonw.exe` 的快捷方式，登录后自动后台起服务（无窗口）。服务器上改用 systemd（见 DEPLOY.md）。
 
 ## 开发
 
