@@ -46,6 +46,25 @@ key 永不出现在任何 API 响应中；更新 profile 时 key 留空即保留
 
 设 `IMAGE_GEN_TOKEN=<随机串>`（或 `--token`）启用认证——客户端需带 `X-Auth-Token` 头或 `?token=` 参数；图库目录用 `IMAGE_GEN_LIBRARY` 指定；建议置于反向代理（HTTPS）之后。完整步骤（systemd / Docker / Caddy-Nginx 反代 / 安全清单）见 [DEPLOY.md](DEPLOY.md)。本地 Windows 双击 `start.bat` 即可启动。
 
+### 多用户（一人一库，单实例隔离）
+
+给多人用时配置 users 文件（默认 `~/.codex/imagegen-users.json`，或 `IMAGE_GEN_USERS` / `--users` 指定）：
+
+```json
+{
+  "users": [
+    {"name": "alice", "token": "随机串A", "library": "/data/library/alice"},
+    {"name": "bob",   "token": "随机串B"}
+  ]
+}
+```
+
+- 每个用户用**自己的 token** 访问同一地址：`https://img.example.com/?token=随机串A`（页面会记住）；
+- 各自的图库互相不可见：历史、统计、生成产物、参考图都落在自己的库目录里；跨库读图/改评分会被拒（403）；
+- 未写 `library` 的用户落在 `<IMAGE_GEN_LIBRARY>/<name>`（默认 `~/Pictures/imagegen/<name>`）；
+- 配置了 users 文件后，**users 模式优先于单 token**（`IMAGE_GEN_TOKEN` 忽略）；错误或缺失 token 一律 401；
+- 网关凭据（profiles）与模型目录是本实例**全局共享**的——由实例所有者为所有用户统一配置；图的存储与可见性按用户隔离。
+
 ### 备份
 
 图库（图片 + sidecar 账本 + references）是不可再生的资产，建议定期快照：

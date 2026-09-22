@@ -9,10 +9,13 @@ services:
       - IMAGE_GEN_TOKEN=${IMAGE_GEN_TOKEN:-}
       - IMAGE_GEN_LIBRARY=/data/library
       - IMAGE_GEN_PROFILES=/config/imagegen-profiles.json
+      # Optional multi-user mode: one token + library per user; when the
+      # file exists it takes precedence over IMAGE_GEN_TOKEN.
+      - IMAGE_GEN_USERS=/config/imagegen-users.json
     volumes:
       # The engine: clone image-gen next to this repo, or adjust the path.
       - ../image-gen:/app/engine:ro
-      # Catalog + profiles live here (survive rebuilds).
+      # Catalog + profiles (and users file, when used) live here.
       - ./config:/root/.codex
       # The image library.
       - ./library:/data/library

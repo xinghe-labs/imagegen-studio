@@ -100,10 +100,35 @@ server {
 
 客户端访问：打开 `https://img.example.com`，首次会 401——在地址后加 `?token=你的TOKEN`，页面会把 token 存入 localStorage 并自动带上 `X-Auth-Token` 头。
 
-## 5. 安全清单
+## 5. 多用户（可选：一人一库）
 
-- [ ] `IMAGE_GEN_TOKEN` 已设（32+ 位随机串），没设就等于把你的生图 key 公开
+多人共用一个实例时，用 users 文件代替单 token（users 模式优先，`IMAGE_GEN_TOKEN` 被忽略）：
+
+```json
+# /etc/imagegen-users.json（chmod 600）
+{
+  "users": [
+    {"name": "alice", "token": "为每人各生成一条随机串", "library": "/var/lib/imagegen/alice"},
+    {"name": "bob",   "token": "另一条随机串"}
+  ]
+}
+```
+
+```bash
+IMAGE_GEN_USERS=/etc/imagegen-users.json \
+IMAGE_GEN_LIBRARY=/var/lib/imagegen \
+  python scripts/imagegen_server.py --host 127.0.0.1 --port 8642
+```
+
+- 每人用自己的 token 访问 `https://img.example.com/?token=自己的串`；
+- 历史/统计/生成/参考图全部按各自 `library` 隔离，跨库访问被拒；
+- 未写 `library` 的用户落在 `<IMAGE_GEN_LIBRARY>/<name>`；
+- profiles（网关 key）仍为实例级共享，由你统一配置；备份脚本对每个人跑一次（`--source` 指向各自的库）。
+
+## 6. 安全清单
+
+- [ ] `IMAGE_GEN_TOKEN` 已设（32+ 位随机串），或用 users 文件给每人独立 token——没设就等于把你的生图 key 公开
 - [ ] HTTPS（反代或云厂商证书）；token 明文走 HTTP 会被中间人拿走
-- [ ] profiles 文件权限收紧：`chmod 600 ~/.codex/imagegen-profiles.json`
+- [ ] profiles 文件权限收紧：`chmod 600 ~/.codex/imagegen-profiles.json`（users 文件同样 `chmod 600`）
 - [ ] 服务器出网能到你的网关即可，不要把 8642 端口直接暴露公网
 - [ ] key 永远只存在服务端 profiles 文件；任何 API 响应都不含它

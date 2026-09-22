@@ -71,6 +71,13 @@ def default_profiles_path() -> Path:
     return Path.home() / ".codex" / "imagegen-profiles.json"
 
 
+def default_users_path() -> Path:
+    env = os.environ.get("IMAGE_GEN_USERS")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".codex" / "imagegen-users.json"
+
+
 def load_json_file(path: Path, fallback: Any) -> Any:
     if not path.is_file():
         return fallback
@@ -392,17 +399,41 @@ def create_app(
     library_root: Path | None = None,
     profiles_path: Path | None = None,
     token: str | None = None,
+    users_path: Path | None = None,
 ) -> FastAPI:
     library = (library_root or default_library()).expanduser().resolve()
     library.mkdir(parents=True, exist_ok=True)
     profiles_file = (profiles_path or default_profiles_path()).expanduser().resolve()
+    users_file = (users_path or default_users_path()).expanduser().resolve()
+    users = load_json_file(users_file, {"users": []}).get("users", [])
+    user_by_token = {
+        str(u["token"]): u
+        for u in users
+        if isinstance(u, dict) and u.get("token") and u.get("name")
+    }
     auth_token = token or os.environ.get("IMAGE_GEN_TOKEN") or ""
     jobs = JobManager(max_concurrent=2)
     app = FastAPI(title="imagegen studio", docs_url=None, redoc_url=None)
 
+    def library_for_user(user: dict[str, Any]) -> Path:
+        custom = user.get("library")
+        base = Path(str(custom)).expanduser().resolve() if custom else library / str(user["name"])
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+
+    def req_library(request: Request) -> Path:
+        return getattr(request.state, "library", None) or library
+
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
-        if auth_token:
+        if user_by_token:
+            provided = request.headers.get("X-Auth-Token") or request.query_params.get("token")
+            user = user_by_token.get(provided or "")
+            if user is None:
+                return JSONResponse({"detail": "unauthorized"}, status_code=401)
+            request.state.library = library_for_user(user)
+            request.state.user = str(user["name"])
+        elif auth_token:
             provided = request.headers.get("X-Auth-Token") or request.query_params.get("token")
             if provided != auth_token:
                 return JSONResponse({"detail": "unauthorized"}, status_code=401)
@@ -432,13 +463,14 @@ def create_app(
         return FileResponse(WEB_DIR / "style.css", media_type="text/css", headers=no_store)
 
     @app.get("/api/meta")
-    async def meta() -> dict[str, Any]:
+    async def meta(request: Request) -> dict[str, Any]:
         profiles = load_profiles(profiles_file)
         profile = active_profile(profiles)
         base_url = profile.get("base_url") if profile else None
         return {
             "app": "imagegen studio",
-            "library": str(library),
+            "library": str(req_library(request)),
+            "user": getattr(request.state, "user", None),
             "presets": ["fast", "standard", "transparent"],
             "profiles": [
                 {
@@ -455,7 +487,7 @@ def create_app(
         }
 
     @app.post("/api/generate")
-    async def generate(payload: GenerateRequest) -> dict[str, Any]:
+    async def generate(request: Request, payload: GenerateRequest) -> dict[str, Any]:
         profile = profile_for(payload.profile)
         require_gateway_credentials(profile)
         child_env = os.environ.copy()
@@ -468,8 +500,9 @@ def create_app(
         annotate: dict[str, Any] = {}
         if payload_dict.get("project"):
             annotate["project"] = payload_dict["project"]
-        args = build_generate_args(payload_dict, library)
-        job_id = jobs.create(args, child_env, library, annotate=annotate or None)
+        lib = req_library(request)
+        args = build_generate_args(payload_dict, lib)
+        job_id = jobs.create(args, child_env, lib, annotate=annotate or None)
         return {"job_id": job_id, "status": "queued"}
 
     @app.get("/api/jobs/{job_id}")
@@ -482,13 +515,14 @@ def create_app(
 
     @app.get("/api/history")
     async def history(
+        request: Request,
         model: str | None = None,
         q: str | None = None,
         favorites: bool = False,
         project: str | None = None,
         limit: int = Query(default=500, ge=1, le=5000),
     ) -> dict[str, Any]:
-        records = scan_history(library)
+        records = scan_history(req_library(request))
         if model:
             records = [r for r in records if r["model"] == model]
         if q:
@@ -500,15 +534,15 @@ def create_app(
             records = [r for r in records if r["rating"] > 0]
         return {"total": len(records), "records": records[:limit]}
 
-    def confine(image: str) -> Path:
+    def confine(image: str, lib: Path) -> Path:
         candidate = Path(image).expanduser().resolve()
-        if not candidate.is_relative_to(library):
+        if not candidate.is_relative_to(lib):
             raise HTTPException(403, "路径不在图库内")
         return candidate
 
     @app.get("/api/image")
-    async def image(path: str, download: bool = False) -> FileResponse:
-        image_path = confine(path)
+    async def image(request: Request, path: str, download: bool = False) -> FileResponse:
+        image_path = confine(path, req_library(request))
         if not image_path.is_file():
             raise HTTPException(404, "图片不存在")
         media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
@@ -517,8 +551,8 @@ def create_app(
         return FileResponse(image_path, media_type=media.get(image_path.suffix.lower(), "application/octet-stream"))
 
     @app.post("/api/rate")
-    async def rate(payload: RateRequest) -> dict[str, Any]:
-        image_path = confine(payload.image)
+    async def rate(request: Request, payload: RateRequest) -> dict[str, Any]:
+        image_path = confine(payload.image, req_library(request))
         sidecar_path = Path(str(image_path) + ".json")
         if not sidecar_path.is_file():
             raise HTTPException(404, "找不到该图的 sidecar 记录")
@@ -528,8 +562,8 @@ def create_app(
         return {"image": str(image_path), "rating": payload.rating}
 
     @app.post("/api/open")
-    async def open_folder(payload: PathRequest) -> dict[str, str]:
-        image_path = confine(payload.image)
+    async def open_folder(request: Request, payload: PathRequest) -> dict[str, str]:
+        image_path = confine(payload.image, req_library(request))
         folder = image_path.parent
         if sys.platform == "win32":
             os.startfile(folder)  # noqa: S606
@@ -597,6 +631,7 @@ def create_app(
 
     @app.post("/api/edit")
     async def edit_images(
+        request: Request,
         prompt: str = Form(...),
         profile: str = Form(""),
         model: str = Form(""),
@@ -616,14 +651,15 @@ def create_app(
         if len(prompt) > 4000:
             raise HTTPException(422, "修改指令过长（上限 4000 字符）")
         refs: list[Path] = []
+        lib = req_library(request)
         for path_text in image_paths:
-            ref = confine(path_text)
+            ref = confine(path_text, lib)
             if not ref.is_file():
                 raise HTTPException(404, f"参考图不存在: {path_text}")
             refs.append(ref)
         if len(refs) + len(images) > 4:
             raise HTTPException(422, "参考图最多 4 张")
-        refs_dir = library / "references"
+        refs_dir = lib / "references"
         refs_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         for index, upload in enumerate(images):
@@ -635,7 +671,7 @@ def create_app(
             raise HTTPException(422, "图生图至少需要一张参考图")
 
         now = datetime.now()
-        out_dir = library / now.strftime("%Y-%m")
+        out_dir = lib / now.strftime("%Y-%m")
         out_dir.mkdir(parents=True, exist_ok=True)
         output = out_dir / f"{now.strftime('%Y%m%d-%H%M%S')}-{slugify(prompt)}.png"
         args = [sys.executable, str(resolve_cli()), "edit", "--prompt", prompt, "--output", str(output)]
@@ -668,23 +704,23 @@ def create_app(
                 child_env["IMAGE_GENERATION_API_KEY"] = str(profile_entry["api_key"])
             if profile_entry.get("base_url"):
                 child_env["IMAGE_GENERATION_BASE_URL"] = str(profile_entry["base_url"])
-        job_id = jobs.create(args, child_env, library, annotate={"project": project} if project.strip() else None)
+        job_id = jobs.create(args, child_env, lib, annotate={"project": project} if project.strip() else None)
         return {"job_id": job_id, "status": "queued"}
 
     @app.post("/api/project")
-    async def set_project(payload: ProjectRequest) -> dict[str, Any]:
-        image_path = confine(payload.image)
+    async def set_project(request: Request, payload: ProjectRequest) -> dict[str, Any]:
+        image_path = confine(payload.image, req_library(request))
         sidecar_path = Path(str(image_path) + ".json")
         if not sidecar_path.is_file():
             raise HTTPException(404, "找不到该图的 sidecar 记录")
         record = json.loads(sidecar_path.read_text(encoding="utf-8"))
         record["project"] = payload.project.strip()
-        sidecar_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        save_json_file(sidecar_path, record)
         return {"image": str(image_path), "project": record["project"]}
 
     @app.get("/api/stats")
-    async def stats() -> dict[str, Any]:
-        records = scan_history(library)
+    async def stats(request: Request) -> dict[str, Any]:
+        records = scan_history(req_library(request))
         month_prefix = datetime.now().astimezone().strftime("%Y-%m")
         by_model: dict[str, int] = {}
         by_project: dict[str, int] = {}
@@ -720,6 +756,7 @@ def main() -> int:
     parser.add_argument("--library", help="图库根目录，默认 ~/Pictures/imagegen")
     parser.add_argument("--profiles", help="profiles 文件，默认 ~/.codex/imagegen-profiles.json")
     parser.add_argument("--token", help="访问令牌；也可用 IMAGE_GEN_TOKEN 环境变量")
+    parser.add_argument("--users", help="多用户文件（每 token 一个用户/图库），默认 ~/.codex/imagegen-users.json")
     args = parser.parse_args()
 
     import uvicorn
@@ -728,6 +765,7 @@ def main() -> int:
         library_root=Path(args.library) if args.library else None,
         profiles_path=Path(args.profiles) if args.profiles else None,
         token=args.token,
+        users_path=Path(args.users) if args.users else None,
     )
     library = (Path(args.library) if args.library else default_library()).expanduser()
     library.mkdir(parents=True, exist_ok=True)

@@ -100,10 +100,10 @@ def make_profiles_file(directory: Path, base_url: str, api_key: str = "provider-
     return path
 
 
-def poll_job(client: TestClient, job_id: str, timeout: float = 90.0) -> dict:
+def poll_job(client: TestClient, job_id: str, timeout: float = 90.0, headers: dict | None = None) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        job = client.get(f"/api/jobs/{job_id}").json()
+        job = client.get(f"/api/jobs/{job_id}", headers=headers or {}).json()
         if job["status"] in ("done", "error"):
             return job
         time.sleep(0.4)
@@ -286,6 +286,74 @@ class ImagegenServerTest(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["profiles"], [])
         self.assertIsNone(data["active"])
+
+    def _multi_user_app(self, users_file: Path):
+        return server_module.create_app(
+            library_root=self.tmpdir / "shared-root",
+            profiles_path=self.profiles,
+            users_path=users_file,
+        )
+
+    def test_multi_user_isolation_and_token_boundaries(self) -> None:
+        users_file = self.tmpdir / "users.json"
+        alice_lib = self.tmpdir / "lib-alice"
+        users_file.write_text(
+            json.dumps({
+                "users": [
+                    {"name": "alice", "token": "tok-alice", "library": str(alice_lib)},
+                    {"name": "bob", "token": "tok-bob"},
+                ]
+            }),
+            encoding="utf-8",
+        )
+        client = TestClient(self._multi_user_app(users_file))
+
+        # 未带 token / 错误 token → 401
+        self.assertEqual(client.get("/api/meta").status_code, 401)
+        self.assertEqual(client.get("/api/meta?token=nope").status_code, 401)
+
+        alice = {"X-Auth-Token": "tok-alice"}
+        bob = {"X-Auth-Token": "tok-bob"}
+
+        # 各自的图库根：alice 用显式目录，bob 落在 shared-root/bob
+        meta_a = client.get("/api/meta", headers=alice).json()
+        meta_b = client.get("/api/meta", headers=bob).json()
+        self.assertEqual(meta_a["user"], "alice")
+        self.assertEqual(Path(meta_a["library"]), alice_lib.resolve())
+        self.assertEqual(Path(meta_b["library"]), (self.tmpdir / "shared-root" / "bob").resolve())
+        self.assertNotEqual(meta_a["library"], meta_b["library"])
+
+        # alice 生成一张（fake 网关），bob 的历史里不应出现
+        response = {"data": [{"b64_json": ONE_PIXEL_PNG_B64}]}
+        with FakeImageServer([(200, response)]) as gateway:
+            self.profiles.write_text(
+                json.dumps({
+                    "profiles": [{"name": "test", "base_url": gateway.base_url, "api_key": "provider-secret-studio"}],
+                    "active": "test",
+                }),
+                encoding="utf-8",
+            )
+            created = client.post(
+                "/api/generate", json={"prompt": "alice private cat", "preset": "fast"}, headers=alice
+            )
+            self.assertEqual(created.status_code, 200, created.text)
+            job = poll_job(client, created.json()["job_id"], headers=alice)
+            self.assertEqual(job["status"], "done", job)
+            alice_image = job["result"]["saved"][0]
+            self.assertTrue(Path(alice_image).is_relative_to(alice_lib.resolve()))
+
+        self.assertEqual(client.get("/api/history", headers=alice).json()["total"], 1)
+        self.assertEqual(client.get("/api/history", headers=bob).json()["total"], 0)
+        self.assertEqual(client.get("/api/stats", headers=bob).json()["total"], 0)
+
+        # bob 不能借 alice 的路径读图或评分（confine 按各自的图库根）
+        blocked = client.get("/api/image", params={"path": alice_image}, headers=bob)
+        self.assertEqual(blocked.status_code, 403, blocked.text)
+        denied = client.post("/api/rate", json={"image": alice_image, "rating": 5}, headers=bob)
+        self.assertEqual(denied.status_code, 403, denied.text)
+        # alice 自己可以
+        ok = client.get("/api/image", params={"path": alice_image}, headers=alice)
+        self.assertEqual(ok.status_code, 200)
 
     def test_token_guard_when_configured(self) -> None:
         app = server_module.create_app(
