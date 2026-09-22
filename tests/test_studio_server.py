@@ -391,6 +391,33 @@ class ImagegenServerTest(unittest.TestCase):
             self.assertEqual(history["total"], 1)
             self.assertEqual(history["records"][0]["model"], "gpt-image-2")
 
+    def test_edit_accepts_size_format_and_rejects_bad_format(self) -> None:
+        response = {"data": [{"b64_json": ONE_PIXEL_PNG_B64}]}
+        with FakeImageServer([(200, response)]) as gateway:
+            self.profiles.write_text(
+                json.dumps({
+                    "profiles": [{"name": "test", "base_url": gateway.base_url, "api_key": "provider-secret-studio"}],
+                    "active": "test",
+                }),
+                encoding="utf-8",
+            )
+            created = self.client.post(
+                "/api/edit",
+                data={"prompt": "recolor to night", "quality": "medium", "output_format": "png"},
+                files={"images": ("ref3.png", b"\x89PNG-fake-bytes", "image/png")},
+            )
+            self.assertEqual(created.status_code, 200, created.text)
+            job = poll_job(self.client, created.json()["job_id"])
+            self.assertEqual(job["status"], "done", job)
+
+            bad = self.client.post(
+                "/api/edit",
+                data={"prompt": "x", "output_format": "gif"},
+                files={"images": ("ref4.png", b"\x89PNG-fake-bytes", "image/png")},
+            )
+            self.assertEqual(bad.status_code, 422)
+            self.assertIn("png / jpeg / webp", bad.text)
+
     def test_edit_skips_choice_when_model_is_explicit(self) -> None:
         response = {"data": [{"b64_json": ONE_PIXEL_PNG_B64}]}
         with FakeImageServer([(200, response)]) as gateway:

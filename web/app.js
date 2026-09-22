@@ -140,6 +140,8 @@ async function submitEdit() {
   const preset = presetChipValue();
   if (preset) form.append("preset", preset);
   else form.append("quality", "high");
+  if ($("size").value.trim()) form.append("size", $("size").value.trim());
+  if ($("format").value.trim()) form.append("output_format", $("format").value.trim());
   form.append("n", $("n").value);
   for (const p of REF_PATHS) form.append("image_paths", p);
   for (const f of REF_FILES) form.append("images", f, f.name);

@@ -629,6 +629,8 @@ def create_app(
         choice: str = Form(""),
         preset: str = Form(""),
         quality: str = Form(""),
+        size: str = Form(""),
+        output_format: str = Form(""),
         n: str = Form("1"),
         project: str = Form(""),
         image_paths: list[str] = Form([]),
@@ -675,6 +677,12 @@ def create_app(
             if quality not in ("low", "medium", "high"):
                 raise HTTPException(422, "质量仅支持 low / medium / high")
             args += ["--quality", quality]
+        if size:
+            args += ["--size", size]
+        if output_format:
+            if output_format not in ("png", "jpeg", "webp"):
+                raise HTTPException(422, "格式仅支持 png / jpeg / webp")
+            args += ["--format", output_format]
         if int(n) > 1:
             args += ["--n", n]
 
