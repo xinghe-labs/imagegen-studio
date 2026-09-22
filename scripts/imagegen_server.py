@@ -16,6 +16,7 @@ profiles file and are never returned to the frontend.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import re
@@ -24,12 +25,13 @@ import sys
 import threading
 import time
 import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 def resolve_cli() -> Path:
@@ -394,6 +396,10 @@ class ProjectRequest(BaseModel):
     project: str = Field(max_length=60)
 
 
+class PathsRequest(BaseModel):
+    images: list[str] = Field(min_length=1, max_length=200)
+
+
 
 def create_app(
     library_root: Path | None = None,
@@ -424,18 +430,39 @@ def create_app(
     def req_library(request: Request) -> Path:
         return getattr(request.state, "library", None) or library
 
+    # 认证失败限流：同一来源连续失败达阈值后短暂锁定（防 token 爆破）
+    auth_failures: dict[str, list[float]] = {}
+    AUTH_MAX_FAILURES = 10
+    AUTH_WINDOW_SECONDS = 300.0
+
+    def auth_locked(ip: str) -> bool:
+        now = time.time()
+        recent = [t for t in auth_failures.get(ip, []) if now - t < AUTH_WINDOW_SECONDS]
+        if recent:
+            auth_failures[ip] = recent
+        else:
+            auth_failures.pop(ip, None)
+        return len(recent) >= AUTH_MAX_FAILURES
+
+    def auth_failed(ip: str) -> None:
+        auth_failures.setdefault(ip, []).append(time.time())
+
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
-        if user_by_token:
+        if user_by_token or auth_token:
+            ip = request.client.host if request.client else "?"
             provided = request.headers.get("X-Auth-Token") or request.query_params.get("token")
-            user = user_by_token.get(provided or "")
-            if user is None:
-                return JSONResponse({"detail": "unauthorized"}, status_code=401)
-            request.state.library = library_for_user(user)
-            request.state.user = str(user["name"])
-        elif auth_token:
-            provided = request.headers.get("X-Auth-Token") or request.query_params.get("token")
-            if provided != auth_token:
+            if auth_locked(ip):
+                return JSONResponse({"detail": "认证失败次数过多，请稍后再试"}, status_code=429)
+            if user_by_token:
+                user = user_by_token.get(provided or "")
+                if user is None:
+                    auth_failed(ip)
+                    return JSONResponse({"detail": "unauthorized"}, status_code=401)
+                request.state.library = library_for_user(user)
+                request.state.user = str(user["name"])
+            elif provided != auth_token:
+                auth_failed(ip)
                 return JSONResponse({"detail": "unauthorized"}, status_code=401)
         return await call_next(request)
 
@@ -520,6 +547,7 @@ def create_app(
         q: str | None = None,
         favorites: bool = False,
         project: str | None = None,
+        since: str | None = None,
         limit: int = Query(default=500, ge=1, le=5000),
     ) -> dict[str, Any]:
         records = scan_history(req_library(request))
@@ -530,6 +558,8 @@ def create_app(
             records = [r for r in records if needle in (r["prompt"] or "").lower()]
         if project:
             records = [r for r in records if r.get("project") == project]
+        if since:
+            records = [r for r in records if (r["created_at"] or "") >= since]
         if favorites:
             records = [r for r in records if r["rating"] > 0]
         return {"total": len(records), "records": records[:limit]}
@@ -549,6 +579,42 @@ def create_app(
         if download:
             return FileResponse(image_path, media_type=media.get(image_path.suffix.lower(), "application/octet-stream"), filename=image_path.name)
         return FileResponse(image_path, media_type=media.get(image_path.suffix.lower(), "application/octet-stream"))
+
+    @app.post("/api/delete")
+    async def delete_images(request: Request, payload: PathsRequest) -> dict[str, Any]:
+        lib = req_library(request)
+        deleted: list[str] = []
+        for item in payload.images:
+            image_path = confine(item, lib)
+            sidecar_path = Path(str(image_path) + ".json")
+            if image_path.is_file():
+                image_path.unlink()
+                deleted.append(str(image_path))
+            if sidecar_path.is_file():
+                sidecar_path.unlink()
+        if not deleted:
+            raise HTTPException(404, "没有可删除的图片")
+        return {"deleted": deleted, "count": len(deleted)}
+
+    @app.post("/api/zip")
+    async def zip_images(request: Request, payload: PathsRequest) -> Response:
+        lib = req_library(request)
+        buffer = io.BytesIO()
+        added = 0
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for item in payload.images:
+                image_path = confine(item, lib)
+                if image_path.is_file():
+                    archive.write(image_path, arcname=image_path.name)
+                    added += 1
+        if not added:
+            raise HTTPException(404, "没有可打包的图片")
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return Response(
+            buffer.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="imagegen-{stamp}.zip"'},
+        )
 
     @app.post("/api/rate")
     async def rate(request: Request, payload: RateRequest) -> dict[str, Any]:

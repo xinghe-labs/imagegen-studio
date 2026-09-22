@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -12,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -272,6 +274,67 @@ class ImagegenServerTest(unittest.TestCase):
         history = self.client.get("/api/history").json()
         self.assertEqual(history["total"], 1)
         self.assertEqual(history["records"][0]["prompt"], "legacy record")
+
+    def _seed_record(self, name: str, created_at: str = "2026-09-20T12:00:00+08:00") -> Path:
+        image = self.library / f"{name}.png"
+        image.write_bytes(b"fake-image-bytes")
+        Path(str(image) + ".json").write_text(
+            json.dumps({
+                "record_type": "image-generation-sidecar",
+                "model": "gpt-image-2",
+                "prompt": name,
+                "created_at": created_at,
+                "parameters": {},
+            }),
+            encoding="utf-8",
+        )
+        return image
+
+    def test_delete_removes_image_and_sidecar(self) -> None:
+        image = self._seed_record("to-delete")
+        self.assertEqual(self.client.get("/api/history").json()["total"], 1)
+
+        deleted = self.client.post("/api/delete", json={"images": [str(image)]})
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["count"], 1)
+        self.assertFalse(image.is_file())
+        self.assertFalse(Path(str(image) + ".json").is_file())
+        self.assertEqual(self.client.get("/api/history").json()["total"], 0)
+
+        outside = self.tmpdir / "outside2.png"
+        outside.write_bytes(b"x")
+        blocked = self.client.post("/api/delete", json={"images": [str(outside)]})
+        self.assertEqual(blocked.status_code, 403)
+        self.assertTrue(outside.is_file())
+
+    def test_zip_downloads_selected_images(self) -> None:
+        first = self._seed_record("zip-one")
+        second = self._seed_record("zip-two")
+        zip_response = self.client.post("/api/zip", json={"images": [str(first), str(second)]})
+        self.assertEqual(zip_response.status_code, 200, zip_response.text)
+        self.assertEqual(zip_response.headers["content-type"], "application/zip")
+        with zipfile.ZipFile(io.BytesIO(zip_response.content)) as archive:
+            self.assertEqual(sorted(archive.namelist()), ["zip-one.png", "zip-two.png"])
+
+    def test_history_since_filter(self) -> None:
+        self._seed_record("old-record", "2026-01-05T10:00:00+08:00")
+        self._seed_record("new-record", "2026-09-21T10:00:00+08:00")
+        all_records = self.client.get("/api/history").json()
+        self.assertEqual(all_records["total"], 2)
+        recent = self.client.get("/api/history", params={"since": "2026-09-01"}).json()
+        self.assertEqual(recent["total"], 1)
+        self.assertEqual(recent["records"][0]["prompt"], "new-record")
+
+    def test_auth_lockout_after_repeated_failures(self) -> None:
+        app = server_module.create_app(
+            library_root=self.library, profiles_path=self.profiles, token="right-token"
+        )
+        client = TestClient(app)
+        for _ in range(10):
+            self.assertEqual(client.get("/api/meta", headers={"X-Auth-Token": "wrong"}).status_code, 401)
+        locked = client.get("/api/meta", headers={"X-Auth-Token": "right-token"})
+        self.assertEqual(locked.status_code, 429)
+        self.assertIn("次数过多", locked.json()["detail"])
 
     def test_meta_works_without_any_profiles_file(self) -> None:
         # Regression: zero-config machines have no profiles file; /api/meta

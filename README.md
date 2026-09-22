@@ -12,9 +12,11 @@
 
 - **文生图** — 提示词 + 模型（编号目录）+ 预设/自定义尺寸 + 1-4 张批量，任务进度实时显示
 - **图生图** — 上传 1-4 张参考图（或从图库一键「用作参考」），描述修改方向
-- **图库** — sidecar 账本驱动的历史网格：按模型/关键词筛选、只看收藏、★评分写回记录
+- **图库** — sidecar 账本驱动的历史网格：按模型/项目/时间/关键词筛选、只看收藏、★收藏写回记录
+- **看图与整理** — 点图放大（←/→ 翻页）、下载、删除（含账本记录）、多选批量打包下载
 - **多网关配置** — 多套 `{名称, Base URL, API Key}` 一键切换；key 只存服务端配置文件，页面永不回传
-- **认证预留** — 设 `IMAGE_GEN_TOKEN` 即启用访问令牌，为服务器部署零返工
+- **认证** — 设 `IMAGE_GEN_TOKEN` 启用单令牌，或用 users 文件实现多用户隔离（一人一库）
+- **限流** — 认证失败连续 10 次锁定 5 分钟，防 token 爆破
 
 ## 快速开始
 
@@ -48,7 +50,15 @@ key 永不出现在任何 API 响应中；更新 profile 时 key 留空即保留
 
 ### 多用户（一人一库，单实例隔离）
 
-给多人用时配置 users 文件（默认 `~/.codex/imagegen-users.json`，或 `IMAGE_GEN_USERS` / `--users` 指定）：
+给多人用时配置 users 文件（默认 `~/.codex/imagegen-users.json`，或 `IMAGE_GEN_USERS` / `--users` 指定）。用脚本管理最省事：
+
+```bash
+python scripts/add_user.py add alice --base-url https://img.example.com   # 生成 token 并打印访问链接
+python scripts/add_user.py list                                          # 查看（token 打码）
+python scripts/add_user.py remove alice                                  # 移除（图库文件不动）
+```
+
+也可以手写 users 文件：
 
 ```json
 {
@@ -59,10 +69,11 @@ key 永不出现在任何 API 响应中；更新 profile 时 key 留空即保留
 }
 ```
 
-- 每个用户用**自己的 token** 访问同一地址：`https://img.example.com/?token=随机串A`（页面会记住）；
-- 各自的图库互相不可见：历史、统计、生成产物、参考图都落在自己的库目录里；跨库读图/改评分会被拒（403）；
+- 每个用户用**自己的 token** 访问同一地址：`https://img.example.com/?token=随机串A`（页面把 token 存进 localStorage，之后所有请求自动带上，并清掉地址栏里的 token）；
+- 各自的图库互相不可见：历史、统计、生成产物、参考图都落在自己的库目录里；跨库读图/删除/改评分会被拒（403）；
 - 未写 `library` 的用户落在 `<IMAGE_GEN_LIBRARY>/<name>`（默认 `~/Pictures/imagegen/<name>`）；
 - 配置了 users 文件后，**users 模式优先于单 token**（`IMAGE_GEN_TOKEN` 忽略）；错误或缺失 token 一律 401；
+- 连续 10 次认证失败会锁定该来源 5 分钟（防 token 爆破）；
 - 网关凭据（profiles）与模型目录是本实例**全局共享**的——由实例所有者为所有用户统一配置；图的存储与可见性按用户隔离。
 
 ### 备份

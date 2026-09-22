@@ -8,6 +8,23 @@ let CURRENT = null; // record shown in the detail drawer
 let MODE = "t2i";   // t2i | i2i
 let REF_FILES = []; // File objects awaiting upload
 let REF_PATHS = []; // library paths used as references
+let SELECT_MODE = false;   // 多选模式
+let SELECTED = new Set();  // 多选中的图片路径 (multi-select)
+
+// 访问令牌：从 ?token= 取并记住，之后所有请求自动带上
+const AUTH_TOKEN = (() => {
+  const fromUrl = new URLSearchParams(location.search).get("token") || "";
+  if (fromUrl) localStorage.setItem("imagegen-token", fromUrl);
+  return fromUrl || localStorage.getItem("imagegen-token") || "";
+})();
+if (new URLSearchParams(location.search).get("token")) {
+  history.replaceState(null, "", location.pathname + location.hash);
+}
+
+function withToken(url) {
+  if (!AUTH_TOKEN) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(AUTH_TOKEN)}`;
+}
 
 function esc(text) {
   const div = document.createElement("div");
@@ -16,10 +33,13 @@ function esc(text) {
 }
 
 async function api(path, options) {
-  const res = await fetch(path, options);
+  const opts = { ...(options || {}) };
+  if (AUTH_TOKEN) opts.headers = { ...(opts.headers || {}), "X-Auth-Token": AUTH_TOKEN };
+  const res = await fetch(withToken(path), opts);
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch (e) { /* keep */ }
+    if (Array.isArray(detail)) detail = "请求参数不合法";
     throw new Error(detail);
   }
   return res.json();
@@ -91,7 +111,7 @@ function renderRefs() {
   box.innerHTML = "";
   const chips = [];
   REF_PATHS.forEach((p, i) => {
-    chips.push({ kind: "path", index: i, url: `/api/image?path=${encodeURIComponent(p)}` });
+    chips.push({ kind: "path", index: i, url: withToken(`/api/image?path=${encodeURIComponent(p)}`) });
   });
   REF_FILES.forEach((f, i) => {
     if (!f._url) f._url = URL.createObjectURL(f);
@@ -226,7 +246,7 @@ function showLatest(result) {
   const box = $("latest");
   const saved = result.saved || [];
   box.innerHTML = `<div class="latest-row">${saved
-    .map((p) => `<img src="/api/image?path=${encodeURIComponent(p)}" alt="" loading="lazy">`)
+    .map((p) => `<img src="${withToken(`/api/image?path=${encodeURIComponent(p)}`)}" alt="" loading="lazy">`)
     .join("")}</div><div class="muted">${esc(result.model)} · ${esc(result.selection_reason || "")}</div>`;
 }
 
@@ -253,6 +273,12 @@ async function loadHistory() {
   if ($("search").value.trim()) params.set("q", $("search").value.trim());
   if ($("filter-model").value) params.set("model", $("filter-model").value);
   if ($("filter-project").value) params.set("project", $("filter-project").value);
+  const days = Number($("filter-days").value || 0);
+  if (days > 0) {
+    const since = new Date(Date.now() - days * 86400000);
+    const pad = (n) => String(n).padStart(2, "0");
+    params.set("since", `${since.getFullYear()}-${pad(since.getMonth() + 1)}-${pad(since.getDate())}`);
+  }
   if ($("fav-only").checked) params.set("favorites", "true");
   const data = await api(`/api/history?${params}`);
   RECORDS = data.records;
@@ -283,11 +309,14 @@ function refreshModelFilter() {
 function renderGallery() {
   const grid = $("gallery");
   $("empty-hint").classList.toggle("hidden", RECORDS.length > 0);
+  grid.classList.toggle("selecting", SELECT_MODE);
   grid.innerHTML = RECORDS.map((r, i) => {
     const ratio = r.width && r.height ? ` style="aspect-ratio:${r.width}/${r.height}"` : "";
+    const picked = SELECTED.has(r.image);
     return `
-    <figure class="card"${ratio} data-index="${i}">
-      <img src="/api/image?path=${encodeURIComponent(r.image)}" alt="" loading="lazy">
+    <figure class="card${picked ? " picked" : ""}"${ratio} data-index="${i}">
+      <img src="${withToken(`/api/image?path=${encodeURIComponent(r.image)}`)}" alt="" loading="lazy">
+      ${SELECT_MODE ? `<span class="pick">${picked ? "✓" : ""}</span>` : ""}
       <div class="quick-bar">
         <button type="button" data-quick="download" title="下载">⤓</button>
         <button type="button" data-quick="variant" title="以此发起变体">变</button>
@@ -298,12 +327,20 @@ function renderGallery() {
       <figcaption>${esc((r.prompt || "").slice(0, 70))}</figcaption>
     </figure>`;
   }).join("");
+  updateBatchBar();
   grid.onclick = (e) => {
     const quick = e.target.closest("[data-quick]");
     const cardEl = e.target.closest(".card");
     if (!cardEl) return;
     const record = RECORDS[Number(cardEl.dataset.index)];
     if (!record) return;
+    if (SELECT_MODE) {
+      e.stopPropagation();
+      if (SELECTED.has(record.image)) SELECTED.delete(record.image);
+      else SELECTED.add(record.image);
+      renderGallery();
+      return;
+    }
     if (quick) {
       e.stopPropagation();
       const act = quick.dataset.quick;
@@ -317,9 +354,83 @@ function renderGallery() {
   };
 }
 
+function setSelectMode(on) {
+  SELECT_MODE = on;
+  SELECTED.clear();
+  $("select-mode").classList.toggle("on", on);
+  renderGallery();
+}
+
+function updateBatchBar() {
+  const bar = $("batch-bar");
+  const count = SELECTED.size;
+  bar.classList.toggle("hidden", !SELECT_MODE || count === 0);
+  $("batch-count").textContent = String(count);
+}
+
+async function batchDownload() {
+  if (!SELECTED.size) return;
+  const res = await fetch(withToken("/api/zip"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(AUTH_TOKEN ? { "X-Auth-Token": AUTH_TOKEN } : {}) },
+    body: JSON.stringify({ images: [...SELECTED] }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    toast(err.detail || "打包下载失败", "error");
+    return;
+  }
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `imagegen-${SELECTED.size}.zip`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+  toast(`已打包 ${SELECTED.size} 张`, "success");
+}
+
+async function batchDelete() {
+  const count = SELECTED.size;
+  if (!count) return;
+  if (!window.confirm(`删除所选的 ${count} 张图片（含账本记录，不可恢复）？`)) return;
+  try {
+    const res = await api("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ images: [...SELECTED] }),
+    });
+    toast(`已删除 ${res.count} 张`, "success");
+    SELECTED.clear();
+    setSelectMode(false);
+    await loadHistory();
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+async function deleteCurrent() {
+  if (!CURRENT) return;
+  const name = CURRENT.image.split(/[\\/]/).pop();
+  if (!window.confirm(`删除这张图片及其账本记录？\n${name}\n（不可恢复）`)) return;
+  try {
+    await api("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ images: [CURRENT.image] }),
+    });
+    toast("已删除", "success");
+    closeDetail();
+    await loadHistory();
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
 function downloadImage(record) {
   const a = document.createElement("a");
-  a.href = `/api/image?path=${encodeURIComponent(record.image)}&download=1`;
+  a.href = withToken(`/api/image?path=${encodeURIComponent(record.image)}&download=1`);
   a.download = record.image.split(/[\\/]/).pop();
   document.body.append(a);
   a.click();
@@ -368,7 +479,7 @@ function renderFavButton() {
 
 function openDetail(record) {
   CURRENT = record;
-  $("detail-img").src = `/api/image?path=${encodeURIComponent(record.image)}`;
+  $("detail-img").src = withToken(`/api/image?path=${encodeURIComponent(record.image)}`);
   $("detail-prompt").textContent = record.prompt || "";
   renderFavButton();
   const params = record.parameters || {};
@@ -401,15 +512,36 @@ async function onToggleFav() {
 
 /* ---------- lightbox ---------- */
 
+let LB_INDEX = -1; // 放大视图当前在图库里的下标，用于 ←/→ 翻页
+
+function renderLightbox() {
+  const record = RECORDS[LB_INDEX];
+  if (!record) return;
+  $("lightbox-img").src = withToken(`/api/image?path=${encodeURIComponent(record.image)}`);
+  $("lightbox-counter").textContent = `${LB_INDEX + 1} / ${RECORDS.length}`;
+}
+
 function openLightbox() {
   if (!CURRENT) return;
-  $("lightbox-img").src = `/api/image?path=${encodeURIComponent(CURRENT.image)}`;
+  const index = RECORDS.findIndex((r) => r.image === CURRENT.image);
+  LB_INDEX = index >= 0 ? index : 0;
+  renderLightbox();
   $("lightbox").classList.remove("hidden");
+}
+
+function stepLightbox(delta) {
+  if (LB_INDEX < 0 || !RECORDS.length) return;
+  LB_INDEX = (LB_INDEX + delta + RECORDS.length) % RECORDS.length;
+  CURRENT = RECORDS[LB_INDEX];
+  renderLightbox();
+  renderFavButton();
 }
 
 function closeLightbox() {
   $("lightbox").classList.add("hidden");
   $("lightbox-img").src = "";
+  $("lightbox-counter").textContent = "";
+  LB_INDEX = -1;
 }
 
 /* ---------- profiles panel ---------- */
@@ -495,13 +627,25 @@ async function init() {
   $("search").addEventListener("change", loadHistory);
   $("filter-model").addEventListener("change", loadHistory);
   $("filter-project").addEventListener("change", loadHistory);
+  $("filter-days").addEventListener("change", loadHistory);
   $("fav-only").addEventListener("change", loadHistory);
+  $("select-mode").addEventListener("click", () => setSelectMode(!SELECT_MODE));
+  $("batch-zip").addEventListener("click", () => batchDownload().catch((e) => toast(e.message, "error")));
+  $("batch-delete").addEventListener("click", batchDelete);
+  $("batch-clear").addEventListener("click", () => { SELECTED.clear(); renderGallery(); });
+  $("delete-img").addEventListener("click", deleteCurrent);
   $("close-detail").addEventListener("click", closeDetail);
   $("detail-backdrop").addEventListener("click", closeDetail);
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
-    if (!$("lightbox").classList.contains("hidden")) closeLightbox();
-    else closeDetail();
+    const lightboxOpen = !$("lightbox").classList.contains("hidden");
+    if (e.key === "Escape") {
+      if (lightboxOpen) closeLightbox();
+      else closeDetail();
+      return;
+    }
+    if (!lightboxOpen) return;
+    if (e.key === "ArrowRight") stepLightbox(1);
+    else if (e.key === "ArrowLeft") stepLightbox(-1);
   });
   $("detail-fav").addEventListener("click", onToggleFav);
   $("detail-img").addEventListener("click", openLightbox);

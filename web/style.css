@@ -332,6 +332,56 @@ kbd {
 #search { flex: 1; min-width: 170px; }
 .check { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; white-space: nowrap; }
 
+button.danger { color: #f08a8a; border-color: rgba(240, 138, 138, 0.5); }
+button.danger:hover { border-color: #f08a8a; background: rgba(240, 138, 138, 0.08); }
+#select-mode.on { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: -6px 0 14px;
+  padding: 10px 12px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  font-size: 13px;
+}
+.batch-bar b { color: var(--accent); }
+
+.gallery.selecting .card { cursor: pointer; }
+.card.picked { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+.pick {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid #fff9;
+  background: rgba(6, 10, 14, 0.65);
+  color: #fff;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
+.card.picked .pick { background: var(--accent); border-color: var(--accent); color: #06121b; font-weight: 700; }
+
+.lightbox-counter {
+  position: fixed;
+  top: 18px;
+  left: 20px;
+  z-index: 81;
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 1px;
+  background: rgba(6, 10, 14, 0.6);
+  border-radius: 999px;
+  padding: 4px 12px;
+}
+
 .gallery {
   columns: 4 230px;
   column-gap: 12px;

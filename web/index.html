@@ -109,8 +109,22 @@
       <input id="search" placeholder="搜索提示词…">
       <select id="filter-model"><option value="">全部模型</option></select>
       <select id="filter-project"><option value="">全部项目</option></select>
+      <select id="filter-days">
+        <option value="">全部时间</option>
+        <option value="1">今天</option>
+        <option value="7">近 7 天</option>
+        <option value="30">近 30 天</option>
+        <option value="90">近 90 天</option>
+      </select>
       <label class="check"><input type="checkbox" id="fav-only"> 收藏</label>
+      <button id="select-mode" type="button" title="多选：批量下载或删除">多选</button>
       <button id="refresh" type="button" title="重新扫描">↻</button>
+    </div>
+    <div id="batch-bar" class="batch-bar hidden">
+      已选 <b id="batch-count">0</b> 张
+      <button id="batch-zip" type="button">打包下载</button>
+      <button id="batch-delete" type="button" class="danger">删除</button>
+      <button id="batch-clear" type="button">取消选择</button>
     </div>
     <div id="gallery" class="gallery"></div>
     <div id="empty-hint" class="empty-hint hidden">
@@ -137,12 +151,14 @@
       <button id="open-folder" type="button">打开文件夹</button>
       <button id="use-as-variant" type="button">以此发起变体</button>
       <button id="use-as-reference" type="button">用作参考</button>
+      <button id="delete-img" type="button" class="danger">删除</button>
     </div>
   </div>
 </aside>
 
 <div id="lightbox" class="hidden">
   <img id="lightbox-img" alt="">
+  <div id="lightbox-counter" class="lightbox-counter"></div>
   <div class="lightbox-actions">
     <button id="lightbox-close" type="button" class="icon-btn">✕</button>
   </div>
