@@ -48,7 +48,6 @@ function toast(message, type = "info") {
 async function loadMeta() {
   META = await api("/api/meta");
   if ($("cred-hint")) $("cred-hint").classList.toggle("hidden", Boolean(META.credentials));
-  $("library-path").textContent = META.library;
   const profileSelect = $("profile-select");
   profileSelect.innerHTML = "";
   if (!META.profiles.length) {
@@ -242,11 +241,9 @@ async function renderStats() {
     ["收藏", s.favorites],
     ["容量", `${mb} MB`],
   ];
-  const byModel = Object.entries(s.by_model).sort((a, b) => b[1] - a[1]);
-  const modelText = byModel.map(([m, n]) => `${m}×${n}`).join(" · ");
-  $("stats-line").innerHTML =
-    chips.map(([k, v]) => `<span class="stat-chip"><span class="num">${esc(v)}</span><span class="lbl">${esc(k)}</span></span>`).join("") +
-    (modelText ? `<span class="stat-models">${esc(modelText)}</span>` : "");
+  $("stats-line").innerHTML = chips
+    .map(([k, v]) => `<span class="stat-chip"><span class="num">${esc(v)}</span><span class="lbl">${esc(k)}</span></span>`)
+    .join("");
 }
 
 /* ---------- gallery / history ---------- */
@@ -362,16 +359,18 @@ async function toggleFavorite(record) {
 
 /* ---------- detail drawer ---------- */
 
-function starsHTML(rating) {
-  return [1, 2, 3, 4, 5].map((n) =>
-    `<span class="star ${n <= rating ? "on" : ""}" data-star="${n}">★</span>`).join("");
+function renderFavButton() {
+  const btn = $("detail-fav");
+  const on = Boolean(CURRENT && CURRENT.rating);
+  btn.textContent = on ? "★ 已收藏" : "☆ 收藏";
+  btn.classList.toggle("on", on);
 }
 
 function openDetail(record) {
   CURRENT = record;
   $("detail-img").src = `/api/image?path=${encodeURIComponent(record.image)}`;
   $("detail-prompt").textContent = record.prompt || "";
-  $("detail-stars").innerHTML = starsHTML(record.rating || 0);
+  renderFavButton();
   const params = record.parameters || {};
   const rows = [
     ["模型", record.model], ["编号选择", record.choice],
@@ -387,16 +386,30 @@ function openDetail(record) {
   $("detail-backdrop").classList.remove("hidden");
 }
 
-async function onRate(star) {
+async function onToggleFav() {
   if (!CURRENT) return;
+  const next = CURRENT.rating ? 0 : 5;
   await api("/api/rate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ image: CURRENT.image, rating: star }),
+    body: JSON.stringify({ image: CURRENT.image, rating: next }),
   });
-  CURRENT.rating = star;
-  $("detail-stars").innerHTML = starsHTML(star);
-  await loadHistory();
+  CURRENT.rating = next;
+  renderFavButton();
+  renderGallery();
+}
+
+/* ---------- lightbox ---------- */
+
+function openLightbox() {
+  if (!CURRENT) return;
+  $("lightbox-img").src = `/api/image?path=${encodeURIComponent(CURRENT.image)}`;
+  $("lightbox").classList.remove("hidden");
+}
+
+function closeLightbox() {
+  $("lightbox").classList.add("hidden");
+  $("lightbox-img").src = "";
 }
 
 async function copyText(text, hint) {
@@ -494,11 +507,17 @@ async function init() {
   $("detail-backdrop").addEventListener("click", closeDetail);
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    closeDetail();
+    if (!$("lightbox").classList.contains("hidden")) closeLightbox();
+    else closeDetail();
   });
-  $("detail-stars").addEventListener("click", (e) => {
-    const star = e.target.dataset.star;
-    if (star) onRate(Number(star));
+  $("detail-fav").addEventListener("click", onToggleFav);
+  $("detail-img").addEventListener("click", openLightbox);
+  $("lightbox-close").addEventListener("click", closeLightbox);
+  $("lightbox").addEventListener("click", (e) => {
+    if (e.target === $("lightbox")) closeLightbox();
+  });
+  $("lightbox-download").addEventListener("click", () => {
+    if (CURRENT) downloadImage(CURRENT);
   });
   $("copy-cmd").addEventListener("click", async () => {
     if (!CURRENT) return;

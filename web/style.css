@@ -80,14 +80,6 @@ header {
 .header-info { display: flex; align-items: center; gap: 14px; min-width: 0; }
 #profile-select { min-width: 160px; max-width: 320px; }
 #profile-select:disabled { opacity: 0.7; cursor: default; }
-.library-path {
-  color: var(--muted);
-  font-size: 12.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 340px;
-}
 
 /* ---------- layout ---------- */
 
@@ -296,7 +288,6 @@ button:hover { border-color: var(--border-strong); }
 }
 .stat-chip .num { font-size: 16px; font-weight: 700; color: var(--accent); }
 .stat-chip .lbl { font-size: 11px; color: var(--muted); letter-spacing: 1px; }
-.stat-models { font-size: 12px; color: var(--muted); }
 
 .gen-group-head {
   display: flex;
@@ -495,13 +486,21 @@ kbd {
   object-fit: contain;
   border-radius: 10px;
   background: #070b10;
+  cursor: zoom-in;
 }
 .detail-body { margin-top: 14px; }
 
-.stars { font-size: 25px; cursor: pointer; margin-bottom: 10px; letter-spacing: 4px; }
-.star { color: #333d49; transition: color 0.12s, transform 0.12s; display: inline-block; }
-.star:hover { transform: scale(1.15); }
-.star.on { color: var(--amber); }
+.fav-btn {
+  background: var(--input);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 5px 15px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.fav-btn:hover { border-color: var(--amber); }
+.fav-btn.on { color: var(--amber); border-color: var(--amber); background: rgba(240, 165, 69, 0.08); }
 
 #detail-prompt {
   white-space: pre-wrap;
@@ -582,7 +581,6 @@ kbd {
 @media (max-width: 1020px) {
   .workbench { grid-template-columns: 1fr; }
   #generator { position: static; max-height: none; }
-  .library-path { display: none; }
 }
 
 @media (max-width: 640px) {
@@ -599,4 +597,33 @@ kbd {
   #detail-img { max-height: 44vh; }
   .detail-actions button { flex: 1 1 auto; }
   #toast-box { right: 12px; left: 12px; }
+}
+
+/* ---------- lightbox ---------- */
+
+#lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(3, 5, 8, 0.93);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  cursor: zoom-out;
+}
+#lightbox-img {
+  max-width: 94vw;
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+}
+.lightbox-actions {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  display: flex;
+  gap: 8px;
+  cursor: default;
 }
