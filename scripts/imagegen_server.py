@@ -259,9 +259,7 @@ class JobManager:
                             sc_path = Path(sidecar_text)
                             record = json.loads(sc_path.read_text(encoding="utf-8"))
                             record.update(annotate)
-                            sc_path.write_text(
-                                json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
-                            )
+                            save_json_file(sc_path, record)
                         except (json.JSONDecodeError, OSError):
                             continue
             except json.JSONDecodeError:
@@ -383,7 +381,7 @@ def build_reproduce_command(record: dict[str, Any]) -> str:
 
 class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
-    choice: int | None = None
+    choice: int | None = Field(default=None, ge=1, le=10)
     model: str | None = None
     preset: str | None = None
     size: str | None = None
@@ -411,9 +409,9 @@ class ActivateRequest(BaseModel):
 
 
 class CharacterRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=100)
     from_image: str | None = None
-    identity_block: str | None = None
+    identity_block: str | None = Field(default=None, max_length=2000)
 
 
 class ProjectRequest(BaseModel):
@@ -573,7 +571,7 @@ def create_app(
             raise HTTPException(404, "找不到该图的 sidecar 记录")
         record = json.loads(sidecar_path.read_text(encoding="utf-8"))
         record["rating"] = payload.rating
-        sidecar_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        save_json_file(sidecar_path, record)
         return {"image": str(image_path), "rating": payload.rating}
 
     @app.post("/api/reproduce")
@@ -607,19 +605,21 @@ def create_app(
         name, base_url = name.strip(), base_url.strip().rstrip("/")
         if not name:
             raise HTTPException(422, "profile 名不能为空")
-        if not (base_url.startswith(("http://", "https://")) and base_url.endswith("/v1")):
-            raise HTTPException(422, "base_url 必须是 http(s) 且以 /v1 结尾")
+        if not base_url.startswith(("http://", "https://")):
+            raise HTTPException(422, "base_url 必须是 http(s) 地址")
+        if not base_url.endswith("/v1"):
+            base_url += "/v1"
         profiles = load_profiles(profiles_file)
         entries = profiles.setdefault("profiles", [])
         existing = next((p for p in entries if p.get("name") == name), None)
         if existing:
             if api_key:
                 existing["api_key"] = api_key
-            existing["base_url"] = base_url + "/v1" if not base_url.endswith("/v1") else base_url
+            existing["base_url"] = base_url
             if model:
                 existing["model"] = model
         else:
-            entry: dict[str, Any] = {"name": name, "base_url": base_url if base_url.endswith("/v1") else base_url + "/v1"}
+            entry: dict[str, Any] = {"name": name, "base_url": base_url}
             if api_key:
                 entry["api_key"] = api_key
             if model:

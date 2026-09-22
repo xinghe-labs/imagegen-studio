@@ -167,6 +167,36 @@ class ImagegenServerTest(unittest.TestCase):
             self.assertEqual(job["error"]["category"], "spawn")
             self.assertIn("command line too long", job["error"]["summary"])
 
+    def test_gateway_error_is_classified_from_traceback(self) -> None:
+        from unittest import mock
+
+        class Completed:
+            returncode = 1
+            stdout = ""
+            stderr = 'Traceback ... json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)'
+
+        with mock.patch.object(
+            server_module.subprocess, "run", return_value=Completed()  # type: ignore[arg-type]
+        ):
+            created = self.client.post(
+                "/api/generate",
+                json={"prompt": "gateway sniff", "preset": "fast"},
+            )
+            job = poll_job(self.client, created.json()["job_id"])
+            self.assertEqual(job["status"], "error")
+            self.assertEqual(job["error"]["category"], "gateway")
+            self.assertIn("请稍后重试", job["error"]["summary"])
+
+    def test_choice_and_character_lengths_validated(self) -> None:
+        over_choice = self.client.post("/api/generate", json={"prompt": "ok", "choice": 11})
+        self.assertEqual(over_choice.status_code, 422)
+        under_choice = self.client.post("/api/generate", json={"prompt": "ok", "choice": 0})
+        self.assertEqual(under_choice.status_code, 422)
+        long_name = self.client.post(
+            "/api/characters", json={"name": "x" * 101, "identity_block": "y" * 2010}
+        )
+        self.assertEqual(long_name.status_code, 422)
+
     def test_generate_end_to_end_and_history(self) -> None:
         response = {"data": [{"b64_json": ONE_PIXEL_PNG_B64}]}
         with FakeImageServer([(200, response)]) as gateway:
@@ -309,8 +339,15 @@ class ImagegenServerTest(unittest.TestCase):
         entry = next(p for p in meta["profiles"] if p["name"] == "apiclaw")
         self.assertTrue(entry["has_key"])
 
+        # 不带 /v1 的地址现在自动补全，而不是被拒
+        appended = self.client.post(
+            "/api/profiles", data={"name": "no-suffix", "base_url": "https://no-v1.example", "api_key": ""}
+        )
+        self.assertEqual(appended.status_code, 200, appended.text)
+        saved = next(p for p in self.client.get("/api/meta").json()["profiles"] if p["name"] == "no-suffix")
+        self.assertEqual(saved["base_url"], "https://no-v1.example/v1")
         bad = self.client.post(
-            "/api/profiles", data={"name": "bad", "base_url": "https://no-v1.example", "api_key": ""}
+            "/api/profiles", data={"name": "bad", "base_url": "ftp://no-http.example", "api_key": ""}
         )
         self.assertEqual(bad.status_code, 422)
 
