@@ -53,13 +53,9 @@
     <div class="field">
       <span class="field-label">预设</span>
       <div class="chip-group" id="preset">
-        <button type="button" data-v="">自动</button>
+        <button type="button" data-v="" class="on">自动</button>
         <button type="button" data-v="fast">fast 草稿</button>
         <button type="button" data-v="standard">standard</button>
-        <button type="button" data-v="quality" class="on">quality</button>
-        <button type="button" data-v="square-2k">2k 方</button>
-        <button type="button" data-v="landscape-2k">2k 横</button>
-        <button type="button" data-v="portrait-2k">2k 竖</button>
         <button type="button" data-v="transparent">透明底</button>
       </div>
     </div>
@@ -80,7 +76,7 @@
       <summary>自定义尺寸 / 高级（覆盖预设）</summary>
       <div class="field-row">
         <label class="field">尺寸（如 1536x1024）<input id="size" placeholder="留空用预设"></label>
-        <label class="field">质量<input id="quality" placeholder="low / medium / high"></label>
+        <label class="field">质量<input id="quality" placeholder="留空=跟随预设（自动档默认 high）"></label>
         <label class="field">格式<input id="format" placeholder="png / webp"></label>
       </div>
     </details>

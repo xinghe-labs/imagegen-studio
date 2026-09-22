@@ -139,6 +139,7 @@ async function submitEdit() {
   form.append("model", $("model").value || "gpt-image-2");
   const preset = presetChipValue();
   if (preset) form.append("preset", preset);
+  else form.append("quality", "high");
   form.append("n", $("n").value);
   for (const p of REF_PATHS) form.append("image_paths", p);
   for (const f of REF_FILES) form.append("images", f, f.name);
@@ -176,6 +177,8 @@ function collectForm() {
   if ($("size").value.trim()) payload.size = $("size").value.trim();
   if ($("quality").value.trim()) payload.quality = $("quality").value.trim();
   if ($("format").value.trim()) payload.format = $("format").value.trim();
+  // 自动档不传预设：质量留空时默认 high（对应被精简掉的 quality 预设）
+  if (!preset && !payload.quality) payload.quality = "high";
   if ($("project").value.trim()) payload.project = $("project").value.trim();
   const profile = $("profile-select").value;
   if (profile && !$("profile-select").disabled) payload.profile = profile;

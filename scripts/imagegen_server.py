@@ -456,8 +456,7 @@ def create_app(
         return {
             "app": "imagegen studio",
             "library": str(library),
-            "presets": ["fast", "standard", "quality", "final", "square-2k",
-                        "landscape-2k", "portrait-2k", "landscape-4k", "portrait-4k", "transparent"],
+            "presets": ["fast", "standard", "transparent"],
             "profiles": [
                 {
                     "name": p.get("name"),
@@ -629,6 +628,7 @@ def create_app(
         model: str = Form(""),
         choice: str = Form(""),
         preset: str = Form(""),
+        quality: str = Form(""),
         n: str = Form("1"),
         project: str = Form(""),
         image_paths: list[str] = Form([]),
@@ -671,6 +671,10 @@ def create_app(
             args += ["--model", model]
         if preset:
             args += ["--preset", preset]
+        if quality:
+            if quality not in ("low", "medium", "high"):
+                raise HTTPException(422, "质量仅支持 low / medium / high")
+            args += ["--quality", quality]
         if int(n) > 1:
             args += ["--n", n]
 
