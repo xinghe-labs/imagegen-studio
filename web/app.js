@@ -61,7 +61,8 @@ async function loadMeta() {
     for (const p of META.profiles) {
       const opt = document.createElement("option");
       opt.value = p.name;
-      opt.textContent = `${p.name} · ${p.base_url}${p.has_key ? " ✓key" : ""}`;
+      opt.textContent = `${p.name}${p.has_key ? " ✓key" : ""}`;
+      opt.title = p.base_url;
       if (p.name === META.active) opt.selected = true;
       profileSelect.append(opt);
     }
