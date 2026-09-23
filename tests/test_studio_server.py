@@ -102,11 +102,27 @@ def make_profiles_file(directory: Path, base_url: str, api_key: str = "provider-
     return path
 
 
+class FakePopen:
+    """subprocess.Popen 的最小替身：communicate/kill/returncode 足够 JobManager 用。"""
+
+    def __init__(self, returncode: int, stdout: str = "", stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.killed = False
+
+    def communicate(self, timeout: float | None = None):  # type: ignore[no-untyped-def]
+        return self.stdout, self.stderr
+
+    def kill(self) -> None:
+        self.killed = True
+
+
 def poll_job(client: TestClient, job_id: str, timeout: float = 90.0, headers: dict | None = None) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
         job = client.get(f"/api/jobs/{job_id}", headers=headers or {}).json()
-        if job["status"] in ("done", "error"):
+        if job["status"] in ("done", "error", "cancelled"):
             return job
         time.sleep(0.4)
     raise AssertionError("job did not finish in time")
@@ -160,7 +176,7 @@ class ImagegenServerTest(unittest.TestCase):
         def boom(*_args: object, **_kwargs: object) -> None:
             raise OSError("command line too long")
 
-        with mock.patch.object(server_module.subprocess, "run", side_effect=boom):
+        with mock.patch.object(server_module.subprocess, "Popen", side_effect=boom):
             created = self.client.post(
                 "/api/generate",
                 json={"prompt": "spawn boom", "preset": "fast"},
@@ -174,14 +190,11 @@ class ImagegenServerTest(unittest.TestCase):
     def test_gateway_error_is_classified_from_traceback(self) -> None:
         from unittest import mock
 
-        class Completed:
-            returncode = 1
-            stdout = ""
-            stderr = 'Traceback ... json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)'
-
         with mock.patch.object(
-            server_module.subprocess, "run", return_value=Completed()  # type: ignore[arg-type]
-        ) as run_mock:
+            server_module.subprocess,
+            "Popen",
+            return_value=FakePopen(1, stderr='Traceback ... json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)'),
+        ) as popen_mock:
             created = self.client.post(
                 "/api/generate",
                 json={"prompt": "gateway sniff", "preset": "fast"},
@@ -191,33 +204,61 @@ class ImagegenServerTest(unittest.TestCase):
             self.assertEqual(job["error"]["category"], "gateway")
             self.assertIn("自动重试", job["error"]["summary"])
             # 网关类失败会先把整个命令自动重跑一次，再报错
-            self.assertEqual(run_mock.call_count, 2)
+            self.assertEqual(popen_mock.call_count, 2)
             self.assertEqual(job["attempts"], 2)
 
     def test_gateway_failure_is_retried_once_then_succeeds(self) -> None:
         from unittest import mock
 
-        class Failed:
-            returncode = 1
-            stdout = ""
-            stderr = 'Traceback ... json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)'
-
-        class Succeeded:
-            returncode = 0
-            stderr = ""
-            stdout = '{"ok": true, "saved": ["C:/tmp/fake.png"], "sidecars": [], "artifacts": [], "model": "gpt-image-2"}'
-
+        good = '{"ok": true, "saved": ["C:/tmp/fake.png"], "sidecars": [], "artifacts": [], "model": "gpt-image-2"}'
         with mock.patch.object(
-            server_module.subprocess, "run", side_effect=[Failed(), Succeeded()]  # type: ignore[arg-type]
-        ) as run_mock:
+            server_module.subprocess,
+            "Popen",
+            side_effect=[
+                FakePopen(1, stderr='Traceback ... json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)'),
+                FakePopen(0, stdout=good),
+            ],
+        ) as popen_mock:
             created = self.client.post(
                 "/api/generate",
                 json={"prompt": "gateway retry", "preset": "fast"},
             )
             job = poll_job(self.client, created.json()["job_id"])
             self.assertEqual(job["status"], "done", job)
-            self.assertEqual(run_mock.call_count, 2)
+            self.assertEqual(popen_mock.call_count, 2)
             self.assertEqual(job["attempts"], 2)
+
+    def test_cancel_running_job_marks_cancelled(self) -> None:
+        import threading as _threading
+
+        from unittest import mock
+
+        started = _threading.Event()
+
+        class SlowPopen(FakePopen):
+            def communicate(self, timeout=None):  # type: ignore[no-untyped-def]
+                started.set()
+                # 等取消方 kill 之后再返回（模拟被终止）
+                for _ in range(100):
+                    if self.killed:
+                        break
+                    time.sleep(0.05)
+                return "", ""
+
+        proc = SlowPopen(0)
+        with mock.patch.object(server_module.subprocess, "Popen", return_value=proc):
+            created = self.client.post("/api/generate", json={"prompt": "cancel me", "preset": "fast"})
+            job_id = created.json()["job_id"]
+            self.assertTrue(started.wait(timeout=5), "job 未开始运行")
+            cancelled = self.client.post(f"/api/jobs/{job_id}/cancel")
+            self.assertEqual(cancelled.status_code, 200, cancelled.text)
+            self.assertEqual(cancelled.json()["status"], "cancelled")
+            job = poll_job(self.client, job_id)
+            self.assertEqual(job["status"], "cancelled")
+            self.assertEqual(job["error"]["category"], "cancelled")
+
+    def test_cancel_unknown_job_is_404(self) -> None:
+        self.assertEqual(self.client.post("/api/jobs/nope/cancel").status_code, 404)
 
     def test_choice_bounds_validated(self) -> None:
         over_choice = self.client.post("/api/generate", json={"prompt": "ok", "choice": 11})
@@ -318,16 +359,25 @@ class ImagegenServerTest(unittest.TestCase):
         )
         return image
 
-    def test_delete_removes_image_and_sidecar(self) -> None:
+    def test_delete_moves_to_trash_and_restores(self) -> None:
         image = self._seed_record("to-delete")
         self.assertEqual(self.client.get("/api/history").json()["total"], 1)
 
         deleted = self.client.post("/api/delete", json={"images": [str(image)]})
         self.assertEqual(deleted.status_code, 200, deleted.text)
-        self.assertEqual(deleted.json()["count"], 1)
+        payload = deleted.json()
+        self.assertEqual(len(payload["deleted"]), 1)
         self.assertFalse(image.is_file())
         self.assertFalse(Path(str(image) + ".json").is_file())
+        # 回收站里留着文件（可撤销），但不出现在图库列表里
+        self.assertTrue(any((self.library / ".trash").iterdir()))
         self.assertEqual(self.client.get("/api/history").json()["total"], 0)
+
+        restored = self.client.post("/api/restore", json={"moved": payload["moved"]})
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertTrue(image.is_file())
+        self.assertTrue(Path(str(image) + ".json").is_file())
+        self.assertEqual(self.client.get("/api/history").json()["total"], 1)
 
         outside = self.tmpdir / "outside2.png"
         outside.write_bytes(b"x")

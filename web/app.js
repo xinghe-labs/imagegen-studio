@@ -10,6 +10,7 @@ let REF_FILES = []; // File objects awaiting upload
 let REF_PATHS = []; // library paths used as references
 let SELECT_MODE = false;   // 多选模式
 let SELECTED = new Set();  // 多选中的图片路径 (multi-select)
+let LAST_PICK_INDEX = -1;  // 上次点选的卡片下标（Shift 区间选择用）
 
 // 访问令牌：从 ?token= 取并记住，之后所有请求自动带上
 const AUTH_TOKEN = (() => {
@@ -45,7 +46,7 @@ async function api(path, options) {
   return res.json();
 }
 
-function toast(message, type = "info") {
+function toast(message, type = "info", action = null) {
   let box = document.getElementById("toast-box");
   if (!box) {
     box = document.createElement("div");
@@ -54,13 +55,29 @@ function toast(message, type = "info") {
   }
   const el = document.createElement("div");
   el.className = `toast toast-${type}`;
-  el.textContent = message;
+  const text = document.createElement("span");
+  text.textContent = message;
+  el.append(text);
+  let timer = null;
+  if (action && action.label) {
+    // 带操作按钮的 toast（如删除后的「撤销」）停留更久
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "toast-action";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => {
+      if (timer) clearTimeout(timer);
+      el.remove();
+      action.onClick();
+    });
+    el.append(btn);
+  }
   box.append(el);
   requestAnimationFrame(() => el.classList.add("show"));
-  setTimeout(() => {
+  timer = setTimeout(() => {
     el.classList.remove("show");
     setTimeout(() => el.remove(), 320);
-  }, 3400);
+  }, action && action.label ? 12000 : 3400);
 }
 
 /* ---------- meta / profiles ---------- */
@@ -180,6 +197,60 @@ function setPresetChip(value) {
   }
 }
 
+/* ---------- 草稿与参数记忆（刷新不丢） ---------- */
+
+const DRAFT_KEY = "imagegen-draft";
+
+function saveDraft() {
+  try {
+    const ratioBtn = document.querySelector("#ratio .on");
+    localStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({
+        prompt: $("prompt").value,
+        model: $("model").value,
+        n: $("n").value,
+        preset: presetChipValue(),
+        ratio: ratioBtn ? ratioBtn.dataset.ratio : "",
+        size: $("size").value,
+        quality: $("quality").value,
+        format: $("format").value,
+        project: $("project").value,
+        mode: MODE,
+        refPaths: REF_PATHS,
+      }),
+    );
+  } catch (e) {
+    /* 隐私模式下 localStorage 可能不可用，忽略 */
+  }
+}
+
+function loadDraft() {
+  let draft = null;
+  try {
+    draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+  } catch (e) {
+    return;
+  }
+  if (!draft) return;
+  if (draft.prompt) $("prompt").value = draft.prompt;
+  if (draft.model) $("model").value = draft.model;
+  if (draft.n) $("n").value = draft.n;
+  setPresetChip(draft.preset || "");
+  if (draft.ratio) {
+    for (const btn of document.querySelectorAll("#ratio button")) {
+      btn.classList.toggle("on", btn === document.querySelector(`#ratio button[data-ratio="${draft.ratio}"]`));
+    }
+  }
+  $("size").value = draft.size || "";
+  $("quality").value = draft.quality || "";
+  $("format").value = draft.format || "";
+  $("project").value = draft.project || "";
+  REF_PATHS = Array.isArray(draft.refPaths) ? draft.refPaths.filter((p) => typeof p === "string") : [];
+  renderRefs();
+  if (draft.mode === "i2i") setMode("i2i");
+}
+
 function closeDetail() {
   $("detail").classList.add("hidden");
   $("detail-backdrop").classList.add("hidden");
@@ -207,26 +278,56 @@ function collectForm() {
   return payload;
 }
 
+let CURRENT_JOB = null; // 正在轮询的任务 id，用于「取消」
+
 async function pollJob(jobId) {
   const started = Date.now();
-  for (;;) {
-    const job = await api(`/api/jobs/${jobId}`);
-    const secs = Math.round((Date.now() - started) / 1000);
-    $("job-text").textContent =
-      job.status === "running" ? `生成中… ${secs}s` :
-      job.status === "queued" ? "排队中…" : `完成，用时 ${job.elapsed}s`;
-    if (job.status === "done") return job.result;
-    if (job.status === "error") {
-      const err = job.error || {};
-      throw new Error(err.summary || err.category || "生成失败");
+  CURRENT_JOB = jobId;
+  let delay = 1000;
+  try {
+    for (;;) {
+      const job = await api(`/api/jobs/${jobId}`);
+      const secs = Math.round((Date.now() - started) / 1000);
+      const retried = Number(job.attempts || 1) > 1 ? `（已自动重试 ${job.attempts - 1} 次）` : "";
+      $("job-text").textContent =
+        job.status === "running" ? `生成中… ${secs}s${retried}` :
+        job.status === "queued" ? "排队中…" : `完成，用时 ${job.elapsed}s`;
+      if (job.status === "done") return job.result;
+      if (job.status === "cancelled") {
+        const e = new Error("已取消");
+        e.cancelled = true;
+        throw e;
+      }
+      if (job.status === "error") {
+        const err = job.error || {};
+        const e = new Error(err.brief || err.summary || err.category || "生成失败");
+        e.detail = err.summary || "";
+        throw e;
+      }
+      // 长任务退避：1s → 2s → 3s 封顶，减少无谓轮询
+      await new Promise((r) => setTimeout(r, delay));
+      delay = Math.min(delay + 1000, 3000);
     }
-    await new Promise((r) => setTimeout(r, 1000));
+  } finally {
+    CURRENT_JOB = null;
+  }
+}
+
+async function cancelJob() {
+  if (!CURRENT_JOB) return;
+  try {
+    await api(`/api/jobs/${CURRENT_JOB}/cancel`, { method: "POST" });
+    toast("已取消", "info");
+  } catch (e) {
+    toast(e.message, "error");
   }
 }
 
 async function onGenerate() {
   $("generate-btn").disabled = true;
   $("job-status").classList.remove("hidden");
+  $("cancel-job").classList.remove("hidden");
+  $("job-detail").classList.add("hidden");
   $("job-text").textContent = "排队中…";
   try {
     const job_id = MODE === "i2i" ? await submitEdit() : await submitT2I();
@@ -234,12 +335,43 @@ async function onGenerate() {
     showLatest(result);
     toast(`生成完成 · ${result.model || ""}`, "success");
     await loadHistory();
+    highlightFresh(result.saved || []);
   } catch (e) {
-    toast(`生成失败：${e.message}`, "error");
+    if (e.cancelled) {
+      toast("已取消", "info");
+    } else {
+      toast(`生成失败：${e.message}`, "error");
+      if (e.detail) {
+        $("job-detail").textContent = e.detail;
+        $("job-detail").classList.remove("hidden");
+      }
+    }
   } finally {
     $("generate-btn").disabled = false;
-    $("job-status").classList.add("hidden");
+    $("cancel-job").classList.add("hidden");
+    if (!$("job-detail").classList.contains("hidden")) {
+      // 失败详情保留几秒再收起，便于阅读
+      setTimeout(() => $("job-status").classList.add("hidden"), 8000);
+    } else {
+      $("job-status").classList.add("hidden");
+    }
   }
+}
+
+// 生成完成后把新图在图库里标出来并滚到可见处
+function highlightFresh(savedPaths) {
+  const wanted = new Set(savedPaths.map((p) => String(p).toLowerCase()));
+  if (!wanted.size) return;
+  const cards = [...document.querySelectorAll(".card")];
+  const fresh = cards.filter((card) => {
+    const record = RECORDS[Number(card.dataset.index)];
+    return record && wanted.has(String(record.image).toLowerCase());
+  });
+  for (const card of fresh) {
+    card.classList.add("fresh");
+    setTimeout(() => card.classList.remove("fresh"), 4000);
+  }
+  if (fresh[0]) fresh[0].scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 function showLatest(result) {
@@ -285,6 +417,7 @@ async function loadHistory() {
   renderGallery();
   refreshModelFilter();
   refreshProjectFilter();
+  refreshProjectDatalist();
   await renderStats();
 }
 
@@ -319,6 +452,7 @@ function renderGallery() {
       ${SELECT_MODE ? `<span class="pick">${picked ? "✓" : ""}</span>` : ""}
       <div class="quick-bar">
         <button type="button" data-quick="download" title="下载">⤓</button>
+        <button type="button" data-quick="copy" title="复制提示词">⧉</button>
         <button type="button" data-quick="variant" title="以此发起变体">变</button>
         <button type="button" data-quick="reference" title="用作参考">参</button>
         <button type="button" data-quick="fav" title="收藏">${r.rating ? "★" : "☆"}</button>
@@ -333,12 +467,21 @@ function renderGallery() {
     const quick = e.target.closest("[data-quick]");
     const cardEl = e.target.closest(".card");
     if (!cardEl) return;
-    const record = RECORDS[Number(cardEl.dataset.index)];
+    const index = Number(cardEl.dataset.index);
+    const record = RECORDS[index];
     if (!record) return;
     if (SELECT_MODE) {
       e.stopPropagation();
-      if (SELECTED.has(record.image)) SELECTED.delete(record.image);
-      else SELECTED.add(record.image);
+      if (e.shiftKey && LAST_PICK_INDEX >= 0 && LAST_PICK_INDEX !== index) {
+        // Shift 区间选择
+        const [from, to] = [Math.min(LAST_PICK_INDEX, index), Math.max(LAST_PICK_INDEX, index)];
+        for (let i = from; i <= to; i += 1) if (RECORDS[i]) SELECTED.add(RECORDS[i].image);
+      } else if (SELECTED.has(record.image)) {
+        SELECTED.delete(record.image);
+      } else {
+        SELECTED.add(record.image);
+      }
+      LAST_PICK_INDEX = index;
       renderGallery();
       return;
     }
@@ -346,6 +489,7 @@ function renderGallery() {
       e.stopPropagation();
       const act = quick.dataset.quick;
       if (act === "download") downloadImage(record);
+      else if (act === "copy") copyPrompt(record.prompt || "");
       else if (act === "variant") variantFrom(record);
       else if (act === "reference") referenceFrom(record);
       else if (act === "fav") toggleFavorite(record);
@@ -367,6 +511,59 @@ function updateBatchBar() {
   const count = SELECTED.size;
   bar.classList.toggle("hidden", !SELECT_MODE || count === 0);
   $("batch-count").textContent = String(count);
+}
+
+function selectAllVisible() {
+  for (const record of RECORDS) SELECTED.add(record.image);
+  LAST_PICK_INDEX = RECORDS.length - 1;
+  renderGallery();
+}
+
+/* ---------- 访问令牌（部署到带认证的服务器时用） ---------- */
+
+function renderTokenState() {
+  const state = $("token-state");
+  if (!state) return;
+  const has = Boolean(AUTH_TOKEN);
+  state.textContent = has ? `当前已设置令牌（${AUTH_TOKEN.slice(0, 6)}…），存于本浏览器` : "当前未设置令牌（本地直连模式）";
+}
+
+function saveToken() {
+  const value = $("token-input").value.trim();
+  try {
+    if (value) localStorage.setItem("imagegen-token", value);
+    else localStorage.removeItem("imagegen-token");
+  } catch (e) {
+    toast("浏览器不允许保存令牌（隐私模式？）", "error");
+    return;
+  }
+  location.reload();
+}
+
+function clearToken() {
+  try {
+    localStorage.removeItem("imagegen-token");
+  } catch (e) {
+    /* ignore */
+  }
+  location.reload();
+}
+
+/* ---------- 项目名补全 ---------- */
+
+function refreshProjectDatalist() {
+  let list = $("project-list");
+  if (!list) {
+    list = document.createElement("datalist");
+    list.id = "project-list";
+    document.body.append(list);
+    for (const id of ["project", "detail-project"]) {
+      const input = $(id);
+      if (input) input.setAttribute("list", "project-list");
+    }
+  }
+  const projects = [...new Set(RECORDS.map((r) => r.project).filter(Boolean))].sort();
+  list.innerHTML = projects.map((p) => `<option value="${esc(p)}"></option>`).join("");
 }
 
 async function batchDownload() {
@@ -395,14 +592,14 @@ async function batchDownload() {
 async function batchDelete() {
   const count = SELECTED.size;
   if (!count) return;
-  if (!window.confirm(`删除所选的 ${count} 张图片（含账本记录，不可恢复）？`)) return;
+  if (!window.confirm(`删除所选的 ${count} 张图片（移入回收站，可撤销）？`)) return;
   try {
     const res = await api("/api/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ images: [...SELECTED] }),
     });
-    toast(`已删除 ${res.count} 张`, "success");
+    offerRestoreUndo(res, `已删除 ${res.count} 个文件`);
     SELECTED.clear();
     setSelectMode(false);
     await loadHistory();
@@ -411,19 +608,44 @@ async function batchDelete() {
   }
 }
 
+// 删除后给一次「撤销」机会（服务端是移入回收站，可原样放回）
+function offerRestoreUndo(res, message) {
+  const moved = (res && res.moved) || [];
+  if (!moved.length) {
+    toast(message, "success");
+    return;
+  }
+  toast(message, "success", {
+    label: "撤销",
+    onClick: async () => {
+      try {
+        const restored = await api("/api/restore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ moved }),
+        });
+        toast(`已恢复 ${restored.count} 个文件`, "success");
+        await loadHistory();
+      } catch (err) {
+        toast(`恢复失败：${err.message}`, "error");
+      }
+    },
+  });
+}
+
 async function deleteCurrent() {
   if (!CURRENT) return;
   const name = CURRENT.image.split(/[\\/]/).pop();
-  if (!window.confirm(`删除这张图片及其账本记录？\n${name}\n（不可恢复）`)) return;
+  if (!window.confirm(`删除这张图片及其账本记录？\n${name}\n（移入回收站，可撤销，7 天后自动清理）`)) return;
   try {
-    await api("/api/delete", {
+    const res = await api("/api/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ images: [CURRENT.image] }),
     });
-    toast("已删除", "success");
     closeDetail();
     await loadHistory();
+    offerRestoreUndo(res, "已删除");
   } catch (err) {
     toast(err.message, "error");
   }
@@ -464,6 +686,11 @@ function downloadImage(record) {
 }
 
 function variantFrom(record) {
+  const draft = $("prompt").value.trim();
+  const target = (record.prompt || "").trim();
+  if (draft && draft !== target) {
+    if (!window.confirm("提示词框里还有内容，用这张图的提示词覆盖它？\n（取消则先复制走原草稿）")) return;
+  }
   setMode("t2i");
   $("prompt").value = record.prompt || "";
   if (record.model) $("model").value = record.model;
@@ -471,8 +698,19 @@ function variantFrom(record) {
   setPresetChip(params.preset || "");
   $("size").value = params.size || "";
   $("quality").value = params.quality || "";
+  saveDraft();
   closeDetail();
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function copyPrompt(text) {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("提示词已复制", "success");
+  } catch (e) {
+    toast("复制失败（浏览器限制剪贴板）", "error");
+  }
 }
 
 function referenceFrom(record) {
@@ -553,6 +791,29 @@ function openLightbox() {
   LB_INDEX = index >= 0 ? index : 0;
   renderLightbox();
   $("lightbox").classList.remove("hidden");
+  showLightboxHint();
+}
+
+// 首次打开放大视图时提示一次键位（之后不再打扰）
+function showLightboxHint() {
+  let seen = false;
+  try {
+    seen = localStorage.getItem("imagegen-lightbox-hint") === "1";
+  } catch (e) {
+    seen = true;
+  }
+  if (seen) return;
+  const hint = document.createElement("div");
+  hint.className = "toast toast-info show";
+  hint.textContent = "← / → 翻页 · Esc 或点背景关闭";
+  hint.style.cssText = "position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:82;";
+  document.body.append(hint);
+  try {
+    localStorage.setItem("imagegen-lightbox-hint", "1");
+  } catch (e) {
+    /* ignore */
+  }
+  setTimeout(() => hint.remove(), 3200);
 }
 
 function stepLightbox(delta) {
@@ -634,9 +895,23 @@ async function onProfileSubmit(e) {
 async function init() {
   await loadMeta();
   renderProfiles();
+  renderTokenState();
+  loadDraft();
   await loadHistory();
+  refreshProjectDatalist();
 
   $("generate-btn").addEventListener("click", onGenerate);
+  $("cancel-job").addEventListener("click", cancelJob);
+  $("token-save").addEventListener("click", saveToken);
+  $("token-clear").addEventListener("click", clearToken);
+  // 输入变化即存草稿（提示词用防抖）
+  let draftTimer = null;
+  const scheduleDraft = () => {
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveDraft, 400);
+  };
+  $("prompt").addEventListener("input", scheduleDraft);
+  window.addEventListener("beforeunload", saveDraft);
   $("prompt").addEventListener("keydown", (e) => {
     if (e.ctrlKey && e.key === "Enter") onGenerate();
   });
@@ -656,9 +931,10 @@ async function init() {
   $("filter-days").addEventListener("change", loadHistory);
   $("fav-only").addEventListener("change", loadHistory);
   $("select-mode").addEventListener("click", () => setSelectMode(!SELECT_MODE));
+  $("batch-all").addEventListener("click", selectAllVisible);
   $("batch-zip").addEventListener("click", () => batchDownload().catch((e) => toast(e.message, "error")));
   $("batch-delete").addEventListener("click", batchDelete);
-  $("batch-clear").addEventListener("click", () => { SELECTED.clear(); renderGallery(); });
+  $("batch-clear").addEventListener("click", () => { SELECTED.clear(); LAST_PICK_INDEX = -1; renderGallery(); });
   $("delete-img").addEventListener("click", deleteCurrent);
   $("close-detail").addEventListener("click", closeDetail);
   $("detail-backdrop").addEventListener("click", closeDetail);
@@ -679,6 +955,13 @@ async function init() {
   $("lightbox").addEventListener("click", (e) => {
     if (e.target === $("lightbox")) closeLightbox();
   });
+  // 参数控件变化即记住（模型/张数/预设/比例/高级字段/项目/模式）
+  for (const el of document.querySelectorAll("#model, #n, #size, #quality, #format, #project")) {
+    el.addEventListener("change", saveDraft);
+  }
+  document.querySelector("#preset").addEventListener("click", () => setTimeout(saveDraft, 0));
+  document.querySelector("#ratio").addEventListener("click", () => setTimeout(saveDraft, 0));
+  for (const tab of document.querySelectorAll(".tab")) tab.addEventListener("click", () => setTimeout(saveDraft, 0));
   $("open-folder").addEventListener("click", async () => {
     if (!CURRENT) return;
     await api("/api/open", {

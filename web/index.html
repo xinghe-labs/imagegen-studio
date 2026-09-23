@@ -89,14 +89,23 @@
         <button type="submit" class="btn-small">保存</button>
       </form>
       <p class="muted">key 只存在本机服务端配置文件里，页面永不回传。</p>
+      <div class="field-row">
+        <label class="field">访问令牌<input id="token-input" type="password" placeholder="留空 = 不需要令牌"></label>
+        <button id="token-save" type="button" class="btn-small">保存令牌并重载</button>
+        <button id="token-clear" type="button" class="btn-small danger">清除令牌</button>
+      </div>
+      <p id="token-state" class="muted"></p>
     </details>
     <div id="latest"></div>
     </div>
     <div class="gen-footer">
       <div id="job-status" class="hidden">
         <span class="spinner"></span><span id="job-text">排队中…</span>
+        <button id="cancel-job" type="button" class="btn-small danger hidden">取消</button>
       </div>
+      <pre id="job-detail" class="hidden"></pre>
       <button id="generate-btn" type="button" title="在提示词框按 Ctrl+Enter 也可以直接生成">生成</button>
+      <div class="shortcut-hint">Ctrl+Enter 生成 · 点图放大后 ←/→ 翻页 · 卡片悬停有快捷操作</div>
     </div>
   </section>
 
@@ -122,6 +131,7 @@
     </div>
     <div id="batch-bar" class="batch-bar hidden">
       已选 <b id="batch-count">0</b> 张
+      <button id="batch-all" type="button">全选</button>
       <button id="batch-zip" type="button">打包下载</button>
       <button id="batch-delete" type="button" class="danger">删除</button>
       <button id="batch-clear" type="button">取消选择</button>

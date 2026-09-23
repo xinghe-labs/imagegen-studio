@@ -187,9 +187,52 @@ def slugify(text: str) -> str:
     return slug or "image"
 
 
+class _ProcResult:
+    """subprocess.run 的轻量替身：Popen + communicate 之后仍保留三个常用字段。"""
+
+    __slots__ = ("returncode", "stdout", "stderr")
+
+    def __init__(self, returncode: int, stdout: str | None, stderr: str | None) -> None:
+        self.returncode = returncode
+        self.stdout = stdout or ""
+        self.stderr = stderr or ""
+
+
+def _with_brief(error: dict[str, Any] | None) -> dict[str, Any]:
+    """给错误补一句人话短句（前端 toast 用它，完整内容留给「详情」）。"""
+    if not isinstance(error, dict):
+        return {"category": "unknown", "brief": "生成失败", "summary": str(error)}
+    if not error.get("brief"):
+        text = str(error.get("summary") or error.get("category") or "生成失败").strip()
+        error["brief"] = (text.splitlines()[0] if text else "生成失败")[:80]
+    return error
+
+
+TRASH_DIRNAME = ".trash"
+TRASH_KEEP_DAYS = 7
+
+
+def prune_trash(trash: Path, keep_days: int = TRASH_KEEP_DAYS) -> None:
+    """回收站只保留最近 N 天，避免无限增长。"""
+    if not trash.is_dir():
+        return
+    cutoff = time.time() - keep_days * 86400
+    try:
+        entries = list(trash.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        try:
+            if entry.stat().st_mtime < cutoff:
+                entry.unlink()
+        except OSError:
+            continue
+
+
 class JobManager:
     def __init__(self, max_concurrent: int = 2) -> None:
         self._jobs: dict[str, dict[str, Any]] = {}
+        self._procs: dict[str, Any] = {}  # job_id -> Popen（供取消时终止）
         self._lock = threading.Lock()
         self._slots = threading.Semaphore(max_concurrent)
 
@@ -217,6 +260,24 @@ class JobManager:
         thread.start()
         return job_id
 
+    def cancel(self, job_id: str) -> dict[str, Any] | None:
+        """取消排队中或正在跑的任务：排队中的直接标记，运行中的终止子进程。"""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            if job["status"] in ("done", "error", "cancelled"):
+                return dict(job)
+            job["status"] = "cancelled"
+            job["error"] = {"category": "cancelled", "brief": "已取消", "summary": "任务已取消。"}
+            proc = self._procs.get(job_id)
+        if proc is not None:
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001 进程可能刚好退出
+                pass
+        return dict(job)
+
     def _run(
         self,
         job_id: str,
@@ -233,7 +294,10 @@ class JobManager:
             job["status"] = "running"
             gateway_retry_left = 1  # 网关偶发空响应：允许整个命令再跑一次
             while True:
-                outcome = self._run_subprocess(args, child_env, cwd)
+                outcome = self._run_subprocess(job_id, args, child_env, cwd)
+                if job["status"] == "cancelled":  # 取消后不再改写状态
+                    job["elapsed"] = round(time.time() - started, 1)
+                    return
                 if outcome[0] == "error":
                     job["status"] = "error"
                     job["error"] = outcome[1]
@@ -258,24 +322,44 @@ class JobManager:
                 return
 
     def _run_subprocess(
-        self, args: list[str], child_env: dict[str, str], cwd: Path
+        self, job_id: str, args: list[str], child_env: dict[str, str], cwd: Path
     ) -> tuple[str, Any]:
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 args,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=900,
                 cwd=str(cwd),
                 env=child_env,
             )
-        except subprocess.TimeoutExpired:
-            return ("error", {"category": "timeout", "summary": "生成超过 15 分钟被终止。"})
         except Exception as exc:  # noqa: BLE001 启动失败（命令行过长/CLI 缺失等）不得让任务悬挂
-            return ("error", {"category": "spawn", "summary": f"生成进程启动失败：{exc}"})
-        return ("proc", proc)
+            return ("error", _with_brief({
+                "category": "spawn",
+                "brief": "生成进程启动失败",
+                "summary": f"生成进程启动失败：{exc}",
+            }))
+        with self._lock:
+            self._procs[job_id] = proc
+        try:
+            stdout, stderr = proc.communicate(timeout=900)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.communicate(timeout=5)
+            except Exception:  # noqa: BLE001 收尾失败无所谓
+                pass
+            return ("error", _with_brief({
+                "category": "timeout",
+                "brief": "超时终止（超过 15 分钟）",
+                "summary": "生成超过 15 分钟被终止。",
+            }))
+        finally:
+            with self._lock:
+                self._procs.pop(job_id, None)
+        return ("proc", _ProcResult(proc.returncode, stdout, stderr))
 
     @staticmethod
     def _collect_success(
@@ -285,7 +369,11 @@ class JobManager:
         try:
             job["result"] = json.loads(proc.stdout)
         except json.JSONDecodeError:
-            return {"category": "parse", "summary": proc.stdout[-400:] or "空输出"}
+            return _with_brief({
+                "category": "parse",
+                "brief": "生成结果解析失败",
+                "summary": proc.stdout[-400:] or "空输出",
+            })
         job["status"] = "done"
         if annotate:
             for sidecar_text in job["result"].get("sidecars", []):
@@ -302,14 +390,15 @@ class JobManager:
     def _classify_failure(proc: Any) -> dict[str, Any]:
         tail = (proc.stderr or proc.stdout)[-400:]
         try:
-            return json.loads(proc.stderr)
+            return _with_brief(json.loads(proc.stderr))
         except (json.JSONDecodeError, TypeError):
             if "JSONDecodeError" in tail or "Expecting value" in tail:
-                return {
+                return _with_brief({
                     "category": "gateway",
+                    "brief": "网关返回了无法解析的响应（已自动重试仍失败）",
                     "summary": "网关返回了无法解析的响应（可能是短暂故障），已自动重试仍失败，请稍后再试。\n" + tail,
-                }
-            return {"category": "cli", "summary": tail}
+                })
+            return _with_brief({"category": "cli", "brief": "生成失败（CLI 报错）", "summary": tail})
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -322,6 +411,8 @@ def scan_history(library: Path) -> list[dict[str, Any]]:
     if not library.is_dir():
         return records
     for sidecar_path in library.rglob("*.json"):
+        if TRASH_DIRNAME in sidecar_path.parts:  # 回收站内容不出现在图库
+            continue
         try:
             record = json.loads(sidecar_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
@@ -428,6 +519,10 @@ class ProjectRequest(BaseModel):
 
 class PathsRequest(BaseModel):
     images: list[str] = Field(min_length=1, max_length=200)
+
+
+class RestoreRequest(BaseModel):
+    moved: list[dict[str, str]] = Field(min_length=1, max_length=600)
 
 
 
@@ -569,6 +664,13 @@ def create_app(
             raise HTTPException(404, "job 不存在")
         return job
 
+    @app.post("/api/jobs/{job_id}/cancel")
+    async def cancel_job(job_id: str) -> dict[str, Any]:
+        job = jobs.cancel(job_id)
+        if job is None:
+            raise HTTPException(404, "job 不存在")
+        return {"id": job_id, "status": job["status"]}
+
 
     @app.get("/api/history")
     async def history(
@@ -612,19 +714,50 @@ def create_app(
 
     @app.post("/api/delete")
     async def delete_images(request: Request, payload: PathsRequest) -> dict[str, Any]:
+        """删除 = 移入 <library>/.trash/（可撤销），并清理过期的回收站内容。"""
         lib = req_library(request)
-        deleted: list[str] = []
-        for item in payload.images:
+        trash = lib / TRASH_DIRNAME
+        trash.mkdir(parents=True, exist_ok=True)
+        prune_trash(trash)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        moved: list[dict[str, str]] = []
+        for index, item in enumerate(payload.images):
             image_path = confine(item, lib)
-            sidecar_path = Path(str(image_path) + ".json")
-            if image_path.is_file():
-                image_path.unlink()
-                deleted.append(str(image_path))
-            if sidecar_path.is_file():
-                sidecar_path.unlink()
-        if not deleted:
+            if not image_path.is_file():
+                continue
+            for path in (image_path, Path(str(image_path) + ".json")):
+                if path.is_file():
+                    dest = trash / f"{stamp}-{index}-{path.name}"
+                    try:
+                        path.replace(dest)
+                    except OSError:
+                        continue
+                    moved.append({"from": str(path), "to": str(dest)})
+        if not moved:
             raise HTTPException(404, "没有可删除的图片")
-        return {"deleted": deleted, "count": len(deleted)}
+        return {"deleted": [m["from"] for m in moved if not m["from"].endswith(".json")], "moved": moved, "count": len(moved)}
+
+    @app.post("/api/restore")
+    async def restore_images(request: Request, payload: RestoreRequest) -> dict[str, Any]:
+        """撤销删除：把回收站里的文件按原路径放回。"""
+        lib = req_library(request)
+        restored: list[str] = []
+        for pair in payload.moved:
+            src = Path(pair.get("to", "")).expanduser().resolve()
+            dest = Path(pair.get("from", "")).expanduser().resolve()
+            if not src.is_file() or not src.is_relative_to(lib) or not dest.is_relative_to(lib):
+                continue
+            if dest.exists():
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                src.replace(dest)
+            except OSError:
+                continue
+            restored.append(str(dest))
+        if not restored:
+            raise HTTPException(404, "没有可恢复的文件")
+        return {"restored": restored, "count": len(restored)}
 
     @app.post("/api/zip")
     async def zip_images(request: Request, payload: PathsRequest) -> Response:
