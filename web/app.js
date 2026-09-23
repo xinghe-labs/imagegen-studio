@@ -708,6 +708,19 @@ async function copyPrompt(text) {
   try {
     await navigator.clipboard.writeText(text);
     toast("提示词已复制", "success");
+    return;
+  } catch (e) {
+    /* 无用户手势 / 权限被拒时回退到 execCommand */
+  }
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.cssText = "position:fixed;opacity:0;";
+    document.body.append(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    toast(ok ? "提示词已复制" : "复制失败（浏览器限制剪贴板）", ok ? "success" : "error");
   } catch (e) {
     toast("复制失败（浏览器限制剪贴板）", "error");
   }
