@@ -207,6 +207,7 @@ class JobManager:
             "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "result": None,
             "error": None,
+            "attempts": 1,
         }
         with self._lock:
             self._jobs[job_id] = job
