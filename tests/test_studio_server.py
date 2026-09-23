@@ -181,7 +181,7 @@ class ImagegenServerTest(unittest.TestCase):
 
         with mock.patch.object(
             server_module.subprocess, "run", return_value=Completed()  # type: ignore[arg-type]
-        ):
+        ) as run_mock:
             created = self.client.post(
                 "/api/generate",
                 json={"prompt": "gateway sniff", "preset": "fast"},
@@ -189,7 +189,35 @@ class ImagegenServerTest(unittest.TestCase):
             job = poll_job(self.client, created.json()["job_id"])
             self.assertEqual(job["status"], "error")
             self.assertEqual(job["error"]["category"], "gateway")
-            self.assertIn("请稍后重试", job["error"]["summary"])
+            self.assertIn("自动重试", job["error"]["summary"])
+            # 网关类失败会先把整个命令自动重跑一次，再报错
+            self.assertEqual(run_mock.call_count, 2)
+            self.assertEqual(job["attempts"], 2)
+
+    def test_gateway_failure_is_retried_once_then_succeeds(self) -> None:
+        from unittest import mock
+
+        class Failed:
+            returncode = 1
+            stdout = ""
+            stderr = 'Traceback ... json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)'
+
+        class Succeeded:
+            returncode = 0
+            stderr = ""
+            stdout = '{"ok": true, "saved": ["C:/tmp/fake.png"], "sidecars": [], "artifacts": [], "model": "gpt-image-2"}'
+
+        with mock.patch.object(
+            server_module.subprocess, "run", side_effect=[Failed(), Succeeded()]  # type: ignore[arg-type]
+        ) as run_mock:
+            created = self.client.post(
+                "/api/generate",
+                json={"prompt": "gateway retry", "preset": "fast"},
+            )
+            job = poll_job(self.client, created.json()["job_id"])
+            self.assertEqual(job["status"], "done", job)
+            self.assertEqual(run_mock.call_count, 2)
+            self.assertEqual(job["attempts"], 2)
 
     def test_choice_bounds_validated(self) -> None:
         over_choice = self.client.post("/api/generate", json={"prompt": "ok", "choice": 11})

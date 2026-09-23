@@ -230,56 +230,85 @@ class JobManager:
             if job["status"] == "cancelled":
                 return
             job["status"] = "running"
-            try:
-                proc = subprocess.run(
-                    args,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=900,
-                    cwd=str(cwd),
-                    env=child_env,
-                )
-            except subprocess.TimeoutExpired:
-                job["status"] = "error"
-                job["error"] = {"category": "timeout", "summary": "生成超过 15 分钟被终止。"}
-                return
-            except Exception as exc:  # noqa: BLE001 启动失败（命令行过长/CLI 缺失等）不得让任务悬挂
-                job["status"] = "error"
-                job["error"] = {"category": "spawn", "summary": f"生成进程启动失败：{exc}"}
-                return
-            finally:
-                job["elapsed"] = round(time.time() - started, 1)
-        if proc.returncode == 0:
-            try:
-                job["result"] = json.loads(proc.stdout)
-                job["status"] = "done"
-                if annotate:
-                    for sidecar_text in job["result"].get("sidecars", []):
-                        try:
-                            sc_path = Path(sidecar_text)
-                            record = json.loads(sc_path.read_text(encoding="utf-8"))
-                            record.update(annotate)
-                            save_json_file(sc_path, record)
-                        except (json.JSONDecodeError, OSError):
-                            continue
-            except json.JSONDecodeError:
-                job["status"] = "error"
-                job["error"] = {"category": "parse", "summary": proc.stdout[-400:] or "空输出"}
-        else:
-            tail = (proc.stderr or proc.stdout)[-400:]
-            try:
-                job["error"] = json.loads(proc.stderr)
-            except (json.JSONDecodeError, TypeError):
-                if "JSONDecodeError" in tail or "Expecting value" in tail:
-                    job["error"] = {
-                        "category": "gateway",
-                        "summary": "网关返回了无法解析的响应（可能是短暂故障），请稍后重试。\n" + tail,
-                    }
+            gateway_retry_left = 1  # 网关偶发空响应：允许整个命令再跑一次
+            while True:
+                outcome = self._run_subprocess(args, child_env, cwd)
+                if outcome[0] == "error":
+                    job["status"] = "error"
+                    job["error"] = outcome[1]
+                    job["elapsed"] = round(time.time() - started, 1)
+                    return
+                proc = outcome[1]
+                if proc.returncode == 0:
+                    error = self._collect_success(job, proc, annotate)
                 else:
-                    job["error"] = {"category": "cli", "summary": tail}
-            job["status"] = "error"
+                    error = self._classify_failure(proc)
+                if error is None:
+                    job["elapsed"] = round(time.time() - started, 1)
+                    return
+                # 只有网关类瞬时故障值得重跑；其余错误（参数、认证、CLI 用法）重跑没意义
+                if error.get("category") == "gateway" and gateway_retry_left > 0:
+                    gateway_retry_left -= 1
+                    job["attempts"] = int(job.get("attempts") or 1) + 1
+                    continue
+                job["status"] = "error"
+                job["error"] = error
+                job["elapsed"] = round(time.time() - started, 1)
+                return
+
+    def _run_subprocess(
+        self, args: list[str], child_env: dict[str, str], cwd: Path
+    ) -> tuple[str, Any]:
+        try:
+            proc = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=900,
+                cwd=str(cwd),
+                env=child_env,
+            )
+        except subprocess.TimeoutExpired:
+            return ("error", {"category": "timeout", "summary": "生成超过 15 分钟被终止。"})
+        except Exception as exc:  # noqa: BLE001 启动失败（命令行过长/CLI 缺失等）不得让任务悬挂
+            return ("error", {"category": "spawn", "summary": f"生成进程启动失败：{exc}"})
+        return ("proc", proc)
+
+    @staticmethod
+    def _collect_success(
+        job: dict[str, Any], proc: Any, annotate: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """成功时填充结果并回写账本；返回 None 表示任务完成。"""
+        try:
+            job["result"] = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            return {"category": "parse", "summary": proc.stdout[-400:] or "空输出"}
+        job["status"] = "done"
+        if annotate:
+            for sidecar_text in job["result"].get("sidecars", []):
+                try:
+                    sc_path = Path(sidecar_text)
+                    record = json.loads(sc_path.read_text(encoding="utf-8"))
+                    record.update(annotate)
+                    save_json_file(sc_path, record)
+                except (json.JSONDecodeError, OSError):
+                    continue
+        return None
+
+    @staticmethod
+    def _classify_failure(proc: Any) -> dict[str, Any]:
+        tail = (proc.stderr or proc.stdout)[-400:]
+        try:
+            return json.loads(proc.stderr)
+        except (json.JSONDecodeError, TypeError):
+            if "JSONDecodeError" in tail or "Expecting value" in tail:
+                return {
+                    "category": "gateway",
+                    "summary": "网关返回了无法解析的响应（可能是短暂故障），已自动重试仍失败，请稍后再试。\n" + tail,
+                }
+            return {"category": "cli", "summary": tail}
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:

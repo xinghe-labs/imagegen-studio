@@ -369,6 +369,21 @@ button.danger:hover { border-color: #f08a8a; background: rgba(240, 138, 138, 0.0
 }
 .card.picked .pick { background: var(--accent); border-color: var(--accent); color: #06121b; font-weight: 700; }
 
+/* 图片自动重试后仍加载失败：标出来，方便点刷新重取 */
+.card.img-failed { border-color: rgba(240, 138, 138, 0.6); }
+.card.img-failed::after {
+  content: "↻ 加载失败，点右上角刷新";
+  position: absolute;
+  inset: auto 8px 8px 8px;
+  z-index: 2;
+  font-size: 11.5px;
+  color: #f08a8a;
+  background: rgba(6, 10, 14, 0.72);
+  border-radius: 6px;
+  padding: 3px 8px;
+  text-align: center;
+}
+
 .lightbox-counter {
   position: fixed;
   top: 18px;

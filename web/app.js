@@ -328,6 +328,7 @@ function renderGallery() {
     </figure>`;
   }).join("");
   updateBatchBar();
+  attachImageRetry();
   grid.onclick = (e) => {
     const quick = e.target.closest("[data-quick]");
     const cardEl = e.target.closest(".card");
@@ -426,6 +427,31 @@ async function deleteCurrent() {
   } catch (err) {
     toast(err.message, "error");
   }
+}
+
+// 图片加载失败（网关/C 端瞬时故障、请求被取消）时自动重试一次，失败则标记出来
+function attachImageRetry() {
+  if (attachImageRetry.done) return;
+  attachImageRetry.done = true;
+  document.addEventListener(
+    "error",
+    (e) => {
+      const img = e.target;
+      if (!img || img.tagName !== "IMG") return;
+      const tries = Number(img.dataset.retry || 0);
+      if (tries >= 1) {
+        const card = img.closest(".card");
+        if (card) card.classList.add("img-failed");
+        return;
+      }
+      img.dataset.retry = String(tries + 1);
+      const base = img.src.split("&_r=")[0];
+      setTimeout(() => {
+        img.src = `${base}&_r=${Date.now()}`;
+      }, 600);
+    },
+    true,
+  );
 }
 
 function downloadImage(record) {
