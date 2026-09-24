@@ -14,6 +14,7 @@ import threading
 import time
 import unittest
 import zipfile
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -384,6 +385,92 @@ class ImagegenServerTest(unittest.TestCase):
         blocked = self.client.post("/api/delete", json={"images": [str(outside)]})
         self.assertEqual(blocked.status_code, 403)
         self.assertTrue(outside.is_file())
+
+    def test_restore_only_accepts_trash_sources(self) -> None:
+        # 不能借 /api/restore 变成「库内任意移动文件」：来源必须在回收站里
+        victim = self._seed_record("victim")
+        target = self.library / "moved-away.png"
+        response = self.client.post(
+            "/api/restore",
+            json={"moved": [{"from": str(target), "to": str(victim)}]},
+        )
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertTrue(victim.is_file())
+        self.assertFalse(target.exists())
+
+    def test_trash_retention_uses_deletion_time_not_mtime(self) -> None:
+        # os.replace 保留原 mtime：老图今天被删，必须仍留在回收站里（可撤销）
+        image = self._seed_record("old-image")
+        old = time.time() - 30 * 86400
+        os.utime(image, (old, old))
+        deleted = self.client.post("/api/delete", json={"images": [str(image)]})
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        trash = self.library / ".trash"
+        # 再触发一次删除流程（内部会 prune）——刚删的条目不应被清掉
+        other = self._seed_record("trigger-prune")
+        self.client.post("/api/delete", json={"images": [str(other)]})
+        names = [p.name for p in trash.iterdir()]
+        self.assertTrue(any("old-image" in n for n in names), names)
+
+    def test_cancelled_job_removes_partial_image_without_sidecar(self) -> None:
+        import threading as _threading
+
+        from unittest import mock
+
+        month = self.library / datetime.now().strftime("%Y-%m")
+        month.mkdir(parents=True, exist_ok=True)
+        started = _threading.Event()
+        stale = month / "20260101-000000-user-kept.png"  # 任务开始前就存在，绝不能删
+
+        class SlowPopen(FakePopen):
+            def communicate(self, timeout=None):  # type: ignore[no-untyped-def]
+                started.set()
+                # 模拟被终止前留下一个半截文件（无账本）
+                partial = month / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-half-written.png"
+                partial.write_bytes(b"\x89PNG-half")
+                time.sleep(2.5)  # 让它超过「2 秒新鲜度」保护（避免误删并发任务的在写文件）
+                for _ in range(100):
+                    if self.killed:
+                        break
+                    time.sleep(0.05)
+                return "", ""
+
+        # 任务开始前就存在的文件（mtime 更早），清理绝不能碰
+        stale.write_bytes(b"keep me")
+        old_stamp = time.time() - 3600
+        os.utime(stale, (old_stamp, old_stamp))
+        proc = SlowPopen(0)
+        with mock.patch.object(server_module.subprocess, "Popen", return_value=proc):
+            created = self.client.post("/api/generate", json={"prompt": "cancel partial", "preset": "fast"})
+            job_id = created.json()["job_id"]
+            self.assertTrue(started.wait(timeout=5))
+            self.client.post(f"/api/jobs/{job_id}/cancel")
+            # cancel() 立刻置状态，清理在工作线程里稍后完成：等 removed_partials 出现再断言
+            deadline = time.time() + 10
+            removed = None
+            while time.time() < deadline:
+                job = self.client.get(f"/api/jobs/{job_id}").json()
+                removed = (job.get("error") or {}).get("removed_partials")
+                if removed is not None:
+                    break
+                time.sleep(0.2)
+            self.assertEqual(job["status"], "cancelled")
+            self.assertIsNotNone(removed, "未等到残片清理完成")
+
+        self.assertTrue(stale.is_file(), "任务开始前就有的文件被误删了")
+        leftovers = [p.name for p in month.glob("*half-written*")]
+        self.assertEqual(leftovers, [], "取消后应清掉无账本的半截图片")
+
+    def test_static_assets_stay_public_under_token_mode(self) -> None:
+        # 令牌模式下页面本身必须能打开（否则输错令牌就再也进不了 UI）
+        app = server_module.create_app(
+            library_root=self.library, profiles_path=self.profiles, token="tok-123"
+        )
+        client = TestClient(app)
+        for path in ("/", "/app.js", "/style.css"):
+            self.assertEqual(client.get(path).status_code, 200, path)
+        self.assertEqual(client.get("/api/meta").status_code, 401)
+        self.assertEqual(client.get("/api/meta", headers={"X-Auth-Token": "tok-123"}).status_code, 200)
 
     def test_zip_downloads_selected_images(self) -> None:
         first = self._seed_record("zip-one")

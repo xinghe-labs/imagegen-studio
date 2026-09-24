@@ -41,9 +41,18 @@ async function api(path, options) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch (e) { /* keep */ }
     if (Array.isArray(detail)) detail = "请求参数不合法";
+    if (res.status === 401) showAuthHint(detail);
     throw new Error(detail);
   }
   return res.json();
+}
+
+// 令牌缺失/失效时：页面本身仍能打开（静态资源免认证），这里给出修复入口
+function showAuthHint(detail) {
+  const hint = $("auth-hint");
+  if (!hint) return;
+  hint.classList.remove("hidden");
+  hint.textContent = `需要访问令牌（${detail || "401"}）——请在下方「网关配置」里填入令牌后保存。`;
 }
 
 function toast(message, type = "info", action = null) {
@@ -201,11 +210,16 @@ function setPresetChip(value) {
 
 const DRAFT_KEY = "imagegen-draft";
 
+// 多用户下同一浏览器可能切换令牌：草稿按令牌分开存，避免串台
+function draftKey() {
+  return AUTH_TOKEN ? `${DRAFT_KEY}:${AUTH_TOKEN.slice(0, 10)}` : DRAFT_KEY;
+}
+
 function saveDraft() {
   try {
     const ratioBtn = document.querySelector("#ratio .on");
     localStorage.setItem(
-      DRAFT_KEY,
+      draftKey(),
       JSON.stringify({
         prompt: $("prompt").value,
         model: $("model").value,
@@ -228,7 +242,7 @@ function saveDraft() {
 function loadDraft() {
   let draft = null;
   try {
-    draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+    draft = JSON.parse(localStorage.getItem(draftKey()) || "null");
   } catch (e) {
     return;
   }
@@ -599,7 +613,7 @@ async function batchDelete() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ images: [...SELECTED] }),
     });
-    offerRestoreUndo(res, `已删除 ${res.count} 个文件`);
+    offerRestoreUndo(res, `已删除 ${(res.deleted || []).length || res.count} 张`);
     SELECTED.clear();
     setSelectMode(false);
     await loadHistory();

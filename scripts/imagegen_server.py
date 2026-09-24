@@ -210,10 +210,30 @@ def _with_brief(error: dict[str, Any] | None) -> dict[str, Any]:
 
 TRASH_DIRNAME = ".trash"
 TRASH_KEEP_DAYS = 7
+TRASH_STAMP_RE = re.compile(r"^(\d{8})-(\d{6})-")
+
+
+def trash_deleted_at(entry: Path) -> float:
+    """回收站条目的删除时刻：取自文件名的 <YYYYmmdd>-<HHMMSS>- 前缀。
+
+    不能用 mtime——os.replace 会保留原文件的修改时间，那样「今天删除一张老图」
+    会被立刻当成过期清掉，撤销窗口形同虚设。文件名对不上的（外来文件）退回 mtime。
+    """
+    match = TRASH_STAMP_RE.match(entry.name)
+    if match:
+        try:
+            stamp = datetime.strptime(match.group(1) + match.group(2), "%Y%m%d%H%M%S")
+            return stamp.timestamp()
+        except ValueError:
+            pass
+    try:
+        return entry.stat().st_mtime
+    except OSError:
+        return time.time()
 
 
 def prune_trash(trash: Path, keep_days: int = TRASH_KEEP_DAYS) -> None:
-    """回收站只保留最近 N 天，避免无限增长。"""
+    """回收站按「删除时间」保留最近 N 天，避免无限增长。"""
     if not trash.is_dir():
         return
     cutoff = time.time() - keep_days * 86400
@@ -222,11 +242,49 @@ def prune_trash(trash: Path, keep_days: int = TRASH_KEEP_DAYS) -> None:
     except OSError:
         return
     for entry in entries:
-        try:
-            if entry.stat().st_mtime < cutoff:
+        if trash_deleted_at(entry) < cutoff:
+            try:
                 entry.unlink()
+            except OSError:
+                continue
+
+
+PARTIAL_IMAGE_RE = re.compile(r"^\d{8}-\d{6}-.*\.(png|jpe?g|webp)$", re.IGNORECASE)
+
+
+def _cleanup_partials(cwd: Path, started: float) -> list[str]:
+    """取消任务后清掉「本次任务新产生、但没有账本」的图片残片。
+
+    被终止的 CLI 可能刚好写了一半图片（账本还没写），这种文件图库扫不到、
+    却会一直躺在目录里。只删同时满足：图片后缀、命名符合 CLI 产物格式、
+    没有同名 .json 账本、修改时间不早于任务开始——避免误删用户自己的文件。
+    """
+    removed: list[str] = []
+    if not cwd.is_dir():
+        return removed
+    try:
+        candidates = [p for p in cwd.rglob("*") if p.is_file() and PARTIAL_IMAGE_RE.match(p.name)]
+    except OSError:
+        return removed
+    for path in candidates:
+        if TRASH_DIRNAME in path.parts:
+            continue
+        try:
+            mtime = path.stat().st_mtime
         except OSError:
             continue
+        if mtime < started - 1:
+            continue  # 任务开始前就存在的文件：不是本次残片
+        if time.time() - mtime < 2:
+            continue  # 太新：可能是另一个并发任务正在写入（账本还没落），别抢
+        if Path(str(path) + ".json").is_file():
+            continue
+        try:
+            path.unlink()
+            removed.append(str(path))
+        except OSError:
+            continue
+    return removed
 
 
 class JobManager:
@@ -296,6 +354,7 @@ class JobManager:
             while True:
                 outcome = self._run_subprocess(job_id, args, child_env, cwd)
                 if job["status"] == "cancelled":  # 取消后不再改写状态
+                    job["error"]["removed_partials"] = _cleanup_partials(cwd, started)
                     job["elapsed"] = round(time.time() - started, 1)
                     return
                 if outcome[0] == "error":
@@ -311,8 +370,9 @@ class JobManager:
                 if error is None:
                     job["elapsed"] = round(time.time() - started, 1)
                     return
-                # 只有网关类瞬时故障值得重跑；其余错误（参数、认证、CLI 用法）重跑没意义
-                if error.get("category") == "gateway" and gateway_retry_left > 0:
+                # 只有「可重试的瞬时故障」（网关/网络类）值得重跑；
+                # 其余错误（参数、认证、CLI 用法）重跑没意义
+                if error.get("retryable") is True and gateway_retry_left > 0:
                     gateway_retry_left -= 1
                     job["attempts"] = int(job.get("attempts") or 1) + 1
                     continue
@@ -386,17 +446,30 @@ class JobManager:
                     continue
         return None
 
+    # CLI 报错里出现这些痕迹 = 瞬时网络/网关故障（掐断连接、读响应中断、超时、空响应）
+    TRANSIENT_MARKERS = (
+        "JSONDecodeError", "Expecting value", "RemoteDisconnected", "ConnectionResetError",
+        "ConnectionRefusedError", "IncompleteRead", "BadStatusLine", "timed out",
+    )
+
     @staticmethod
     def _classify_failure(proc: Any) -> dict[str, Any]:
         tail = (proc.stderr or proc.stdout)[-400:]
         try:
-            return _with_brief(json.loads(proc.stderr))
+            parsed = _with_brief(json.loads(proc.stderr))
+            # CLI 自己的分类里带 retryable 标记的（network_error / gateway_timeout /
+            # gateway_unparseable_response 等）都是瞬时故障
+            if parsed.get("retryable"):
+                parsed["category"] = "gateway"
+                parsed["brief"] = "网关/网络瞬时故障（已自动重试仍失败）"
+            return parsed
         except (json.JSONDecodeError, TypeError):
-            if "JSONDecodeError" in tail or "Expecting value" in tail:
+            if any(marker in tail for marker in JobManager.TRANSIENT_MARKERS):
                 return _with_brief({
                     "category": "gateway",
-                    "brief": "网关返回了无法解析的响应（已自动重试仍失败）",
-                    "summary": "网关返回了无法解析的响应（可能是短暂故障），已自动重试仍失败，请稍后再试。\n" + tail,
+                    "retryable": True,
+                    "brief": "网关/网络瞬时故障（已自动重试仍失败）",
+                    "summary": "网关或网络出现瞬时故障（连接被掐断/响应不完整），已自动重试仍失败，请稍后再试。\n" + tail,
                 })
             return _with_brief({"category": "cli", "brief": "生成失败（CLI 报错）", "summary": tail})
 
@@ -574,7 +647,10 @@ def create_app(
 
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
-        if user_by_token or auth_token:
+        # 只保护 /api/*：静态页面（index/app.js/style.css）不含任何密钥，
+        # 让页面永远能打开，令牌没配/配错时由界面提示并可当场修改——
+        # 否则输错令牌重载后只会看到一页 401，UI 再也进不去（还得跟限流赛跑）。
+        if (user_by_token or auth_token) and request.url.path.startswith("/api/"):
             ip = request.client.host if request.client else "?"
             provided = request.headers.get("X-Auth-Token") or request.query_params.get("token")
             if auth_locked(ip):
@@ -745,7 +821,10 @@ def create_app(
         for pair in payload.moved:
             src = Path(pair.get("to", "")).expanduser().resolve()
             dest = Path(pair.get("from", "")).expanduser().resolve()
-            if not src.is_file() or not src.is_relative_to(lib) or not dest.is_relative_to(lib):
+            # 只接受「确实来自本用户回收站」的来源，避免变成库内任意移动文件
+            if not src.is_file() or TRASH_DIRNAME not in src.parts:
+                continue
+            if not src.is_relative_to(lib / TRASH_DIRNAME) or not dest.is_relative_to(lib):
                 continue
             if dest.exists():
                 continue
