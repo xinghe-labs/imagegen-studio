@@ -57,6 +57,7 @@ def resolve_cli() -> Path:
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 SIDECAR_RECORD_TYPES = {"image-gen-sidecar", "image-generation-sidecar"}
 DEFAULT_PORT = 8642
+APP_VERSION = "1.1.0"
 
 
 def default_library() -> Path:
@@ -697,6 +698,7 @@ def create_app(
         base_url = profile.get("base_url") if profile else None
         return {
             "app": "imagegen studio",
+            "version": APP_VERSION,
             "library": str(req_library(request)),
             "user": getattr(request.state, "user", None),
             "presets": ["fast", "standard", "transparent"],

@@ -76,6 +76,7 @@ header {
 }
 .brand-sub { color: var(--accent); font-weight: 500; margin-left: 6px; }
 .brand-dot { color: var(--border-strong); margin-left: 6px; }
+.brand-version { color: var(--muted); font-size: 12px; margin-left: 10px; font-weight: 400; }
 
 .header-info { display: flex; align-items: center; gap: 14px; min-width: 0; }
 #profile-select { min-width: 160px; max-width: 320px; }

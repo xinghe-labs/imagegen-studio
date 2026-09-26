@@ -93,6 +93,10 @@ function toast(message, type = "info", action = null) {
 
 async function loadMeta() {
   META = await api("/api/meta");
+  if (META.version) {
+    if ($("app-version")) $("app-version").textContent = `v${META.version}`;
+    document.title = `imagegen studio v${META.version}`;
+  }
   if ($("cred-hint")) $("cred-hint").classList.toggle("hidden", Boolean(META.credentials));
   const profileSelect = $("profile-select");
   profileSelect.innerHTML = "";

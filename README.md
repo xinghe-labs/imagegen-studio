@@ -109,7 +109,14 @@ python scripts/install_autostart.py --remove   # 卸载
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-测试完全离线（本地 fake 网关），CI 在 ubuntu 3.10/3.13 + windows 3.11 上跑，并检出 image-gen 仓库作为集成依赖。
+测试完全离线（本地 fake 网关 + fake CLI），CI 在 ubuntu 3.10/3.13 + windows 3.11 上跑，并检出 image-gen 仓库作为集成依赖。
+
+前端冒烟测试（`tests/test_ui_smoke.py`）用 Playwright 驱动真实浏览器，覆盖页面加载、草稿记忆、生成全链路、收藏与批量打包：未安装时自动跳过，想跑全的话：
+
+```bash
+pip install playwright
+python -m playwright install chromium
+```
 
 ## License
 
