@@ -2,6 +2,15 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的格式，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.7.0] - 2026-09-26
+
+### 新增
+
+- **首次启动向导**：全新实例（无 users 且无 token）启动时在控制台打印一次性初始化码，
+  打开 `/?setup=码` 或点页面横幅，输入码 + 管理员名即完成引导——不用再跑 `add_user.py`。
+  安全边界：码只有能看到服务端控制台的人拿得到；用过即作废；实例一旦初始化入口永久关闭；
+  错误尝试计入认证限流；`GET /api/setup/status` 公开、`POST /api/setup/admin` 公开带限流
+
 ## [1.6.1] - 2026-09-26
 
 ### 修复

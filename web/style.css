@@ -187,6 +187,13 @@ body.auth-needed #auth-hint { display: none; }
 .login-go:disabled { opacity: 0.6; cursor: wait; }
 .login-foot { text-align: center; color: var(--muted); font-size: 12.5px; margin: 12px 0 0; }
 
+/* ---------- 初始化管理员对话框 ---------- */
+
+#setup-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 70; }
+#setup-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 71; }
+#setup-dialog .login-card { width: 360px; box-shadow: 0 22px 60px rgba(0, 0, 0, 0.6); }
+#setup-hint a { color: var(--accent); }
+
 .header-info { display: flex; align-items: center; gap: 14px; min-width: 0; }
 #profile-select { min-width: 160px; max-width: 320px; }
 #profile-select:disabled { opacity: 0.7; cursor: default; }

@@ -29,6 +29,8 @@ pip install -r requirements.txt
 python scripts/imagegen_server.py          # → http://127.0.0.1:8642
 ```
 
+**全新实例的首次引导**：启动时控制台会打印一个一次性初始化码和 `/?setup=码` 链接，打开后填个管理员名即可完成引导（完成后码作废）；也可以用 `add_user.py add admin1 --admin` 手动创建。之后在页面上生成邀请码分发即可。
+
 服务端按以下顺序寻找引擎：`IMAGE_GEN_CLI` 环境变量 → 仓库同级目录 `image-gen/` → 已安装的 skill 目录（`~/.agents/skills` 等）。
 
 ### 配置文件

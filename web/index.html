@@ -33,7 +33,18 @@
 </header>
 
 <div id="cred-hint" class="cred-hint hidden">还没有配置任何网关凭据——先在右上角添加一个 profile（名称 + API key + base URL），才能生成图片。</div>
+<div id="setup-hint" class="cred-hint hidden">这是全新实例——<a href="#" id="setup-open">初始化管理员账号</a>（初始化码在服务端控制台输出里）。</div>
 <div id="auth-hint" class="cred-hint hidden"></div>
+<div id="setup-backdrop" class="hidden"></div>
+<div id="setup-dialog" class="hidden">
+  <div class="login-card">
+    <div class="login-brand" style="font-size:19px;">初始化管理员</div>
+    <label class="field">初始化码<input id="setup-code" placeholder="服务端控制台打印的一次性码" autocomplete="off"></label>
+    <label class="field">管理员名<input id="setup-name" placeholder="如 admin" autocomplete="off"></label>
+    <button id="setup-go" type="button" class="login-go">创建并进入</button>
+    <p id="setup-msg" class="muted">创建后此码立即作废，实例进入多用户模式。</p>
+  </div>
+</div>
 <section id="login-view" class="hidden">
   <div class="login-card">
     <div class="login-brand">imagegen<span class="brand-dot">·</span><em>studio</em></div>

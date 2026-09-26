@@ -1118,5 +1118,59 @@ class InvitesApiTest(unittest.TestCase):
         self.assertTrue(response.json()["valid"])
 
 
+class SetupAdminApiTest(unittest.TestCase):
+    """首次引导：全新实例用控制台一次性码创建管理员。"""
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="imagegen-setup-")).resolve()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self._original_code = server_module.SETUP_CODE
+        self.addCleanup(self._restore_code)
+        server_module.SETUP_CODE = None  # 用例间隔离：不让上一个实例的码残留
+
+    def _restore_code(self) -> None:
+        server_module.SETUP_CODE = self._original_code
+
+    def make_client(self, token: str | None = None):
+        # 必须显式指定 users 文件：setup 端点会写入它，绝不能落到本机真实路径
+        users_file = self.tmpdir / "users.json"
+        app = server_module.create_app(
+            library_root=self.tmpdir / "lib", profiles_path=self.tmpdir / "profiles-absent.json",
+            token=token, users_path=users_file,
+        )
+        return TestClient(app), server_module.SETUP_CODE
+
+    def test_open_mode_gets_setup_code(self) -> None:
+        client, code = self.make_client()
+        self.assertTrue(code, "全新实例应生成初始化码")
+        status = client.get("/api/setup/status").json()
+        self.assertTrue(status["needed"])
+
+    def test_wrong_code_rejected_right_code_creates_admin(self) -> None:
+        client, code = self.make_client()
+        bad = client.post("/api/setup/admin", json={"code": "WRONGWRONG", "name": "admin"})
+        self.assertEqual(bad.status_code, 403)
+        response = client.post("/api/setup/admin", json={"code": code, "name": "admin"})
+        self.assertEqual(response.status_code, 200)
+        token = response.json()["token"]
+        meta = client.get("/api/meta", headers={"X-Auth-Token": token}).json()
+        self.assertTrue(meta["is_admin"])
+        self.assertEqual(meta["auth_mode"], "users")
+        # 初始化码一次性：用过即作废，再次创建被拒
+        self.assertIsNone(server_module.SETUP_CODE)
+        again = client.post("/api/setup/admin", json={"code": code, "name": "admin2"})
+        self.assertEqual(again.status_code, 403)
+        self.assertIn("已初始化", again.json()["detail"])
+
+    def test_initialized_instance_refuses_setup(self) -> None:
+        client, code = self.make_client(token="tok-owner")
+        self.assertIsNone(code, "已配置 token 的实例不应生成初始化码")
+        status = client.get("/api/setup/status").json()
+        self.assertFalse(status["needed"])
+        response = client.post("/api/setup/admin", json={"code": "whatever123", "name": "admin"})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("已初始化", response.json()["detail"])
+
+
 if __name__ == "__main__":
     unittest.main()

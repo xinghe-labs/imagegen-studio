@@ -59,7 +59,7 @@ def resolve_cli() -> Path:
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 SIDECAR_RECORD_TYPES = {"image-gen-sidecar", "image-generation-sidecar"}
 DEFAULT_PORT = 8642
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.7.0"
 
 
 def default_library() -> Path:
@@ -595,6 +595,11 @@ class RegisterRequest(BaseModel):
     name: str = Field(min_length=1, max_length=32)
 
 
+class SetupAdminRequest(BaseModel):
+    code: str = Field(min_length=8, max_length=64)
+    name: str = Field(min_length=1, max_length=32)
+
+
 class PathRequest(BaseModel):
     image: str
 
@@ -620,6 +625,10 @@ class RestoreRequest(BaseModel):
 
 UPSTREAM_REPO = "xinghe-labs/imagegen-studio"
 _upstream_cache: dict[str, Any] = {"at": 0.0, "data": None}
+
+# 全新实例（无 users 且无 token）的一次性管理员引导码：只打印在服务端控制台，
+# 页面输入正确后创建管理员并立即作废——第一个访客没有这个码就成不了管理员。
+SETUP_CODE: str | None = None
 
 
 async def fetch_latest_upstream(force: bool = False) -> dict[str, Any]:
@@ -693,6 +702,9 @@ def create_app(
 
     reload_users_if_changed()
     auth_token = token or os.environ.get("IMAGE_GEN_TOKEN") or ""
+    global SETUP_CODE
+    if not users_state["by_token"] and not auth_token and not SETUP_CODE:
+        SETUP_CODE = secrets.token_urlsafe(9)  # 全新实例：生成一次性管理员引导码
     jobs = JobManager(max_concurrent=2)
     app = FastAPI(title="imagegen studio", docs_url=None, redoc_url=None)
 
@@ -727,8 +739,8 @@ def create_app(
         # 只保护 /api/*：静态页面（index/app.js/style.css）不含任何密钥，
         # 让页面永远能打开，令牌没配/配错时由界面提示并可当场修改——
         # 否则输错令牌重载后只会看到一页 401，UI 再也进不去（还得跟限流赛跑）。
-        # /api/register 与 /api/invite/* 是邀请码自助激活入口，公开（自带限流）。
-        public_paths = ("/api/register", "/api/invite/")
+        # /api/register、/api/invite/* 与 /api/setup/* 是邀请码激活和首次引导入口，公开（自带限流）。
+        public_paths = ("/api/register", "/api/invite/", "/api/setup")
         if (users_state["by_token"] or auth_token) and request.url.path.startswith("/api/") \
                 and not request.url.path.startswith(public_paths):
             ip = request.client.host if request.client else "?"
@@ -1201,6 +1213,33 @@ def create_app(
         reload_users_if_changed()
         return {"name": payload.name, "token": token, "library": f"<图库>/{payload.name}"}
 
+    # ---------- 首次引导：全新实例用控制台打印的一次性码创建管理员 ----------
+
+    @app.get("/api/setup/status")
+    async def setup_status() -> dict[str, Any]:
+        users = load_json_file(users_file, {"users": []}).get("users", [])
+        return {"needed": not users and not auth_token}
+
+    @app.post("/api/setup/admin")
+    async def setup_admin(request: Request, payload: SetupAdminRequest) -> dict[str, Any]:
+        global SETUP_CODE
+        ip = request.client.host if request.client else "?"
+        if auth_locked(ip):
+            return JSONResponse({"detail": "尝试次数过多，请稍后再试"}, status_code=429)
+        users = load_json_file(users_file, {"users": []}).get("users", [])
+        if users or auth_token:
+            raise HTTPException(403, "实例已初始化，此入口已关闭")
+        if not SETUP_CODE or payload.code != SETUP_CODE:
+            auth_failed(ip)
+            raise HTTPException(403, "初始化码不对——以服务端控制台打印的为准")
+        if not USER_NAME_RE.fullmatch(payload.name):
+            raise HTTPException(422, "用户名限 1-32 位字母/数字/下划线/连字符")
+        token = secrets.token_urlsafe(24)
+        save_json_file(users_file, {"users": [{"name": payload.name, "token": token, "admin": True}]})
+        reload_users_if_changed()
+        SETUP_CODE = None  # 一次性：用过即作废
+        return {"name": payload.name, "token": token, "link": invite_link(request, token)}
+
     # ---------- 服务端自助更新（git 部署；Docker 请用定时重建） ----------
 
     def self_update_guard(request: Request) -> None:
@@ -1390,6 +1429,13 @@ def main() -> int:
     library = (Path(args.library) if args.library else default_library()).expanduser()
     library.mkdir(parents=True, exist_ok=True)
     print(f"imagegen studio -> http://{args.host}:{args.port}  (图库: {library})")
+    if SETUP_CODE:
+        host_label = "localhost" if args.host in ("0.0.0.0", "::") else args.host
+        print("=" * 62)
+        print("全新实例：请初始化管理员账号（一次性，完成后此码作废）")
+        print(f"  打开 http://{host_label}:{args.port}/?setup={SETUP_CODE}")
+        print(f"  或在页面「初始化管理员」入口输入此码：{SETUP_CODE}")
+        print("=" * 62)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
 

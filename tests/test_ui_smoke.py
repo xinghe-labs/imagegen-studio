@@ -703,5 +703,74 @@ class UsersAdminUITest(unittest.TestCase):
         page.wait_for_selector('#users-list .user-row[data-name="dave"]', timeout=8_000)
 
 
+class SetupAdminUITest(unittest.TestCase):
+    """首次引导 UI：全新实例横幅 → 对话框输控制台码 → 创建管理员并进入。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        try:
+            cls._pw = sync_playwright().start()
+            cls.browser = cls._pw.chromium.launch(headless=True)
+        except Exception as exc:
+            raise unittest.SkipTest(f"playwright 浏览器不可用：{exc}")
+        cls.addClassCleanup(cls._pw.stop)
+        cls.addClassCleanup(cls.browser.close)
+
+        cls.tmpdir = Path(tempfile.mkdtemp(prefix="imagegen-ui-setup-")).resolve()
+        cls.addClassCleanup(shutil.rmtree, cls.tmpdir, ignore_errors=True)
+        profiles_path = cls.tmpdir / "profiles.json"
+        profiles_path.write_text(
+            json.dumps({
+                "profiles": [{"name": "test", "base_url": "https://gateway.example/v1", "api_key": SECRET_KEY}],
+                "active": "test",
+            }),
+            encoding="utf-8",
+        )
+        cls._original_code = server_module.SETUP_CODE
+        cls.addClassCleanup(cls._restore_code)
+        # 显式指向不存在的 users 文件：保证拿到 open 模式（不受本机真实配置干扰）
+        app = server_module.create_app(
+            library_root=cls.tmpdir / "library", profiles_path=profiles_path,
+            users_path=cls.tmpdir / "users-absent.json",
+        )
+        cls.http = _UvicornThread(app)
+        cls.http.__enter__()
+        cls.addClassCleanup(cls.http.__exit__, None, None, None)
+
+    @classmethod
+    def _restore_code(cls) -> None:
+        server_module.SETUP_CODE = cls._original_code
+
+    def setUp(self) -> None:
+        context = self.browser.new_context()
+        self.addCleanup(context.close)
+        self.page = context.new_page()
+
+    def test_first_run_setup_flow(self) -> None:
+        page = self.page
+        page.goto(self.http.base_url)
+        page.wait_for_load_state("networkidle")
+        # open 模式显示初始化横幅，点开对话框
+        page.wait_for_selector("#setup-hint:not(.hidden)")
+        page.click("#setup-open")
+        page.wait_for_selector("#setup-dialog:not(.hidden)")
+        # 错码 → 卡片内报错
+        page.fill("#setup-code", "WRONGWRONG")
+        page.fill("#setup-name", "admin")
+        page.click("#setup-go")
+        page.wait_for_timeout(600)
+        self.assertIn("初始化码不对", page.locator("#setup-msg").inner_text())
+        # 控制台码 → 创建管理员并自动登录
+        page.fill("#setup-code", server_module.SETUP_CODE)
+        page.click("#setup-go")
+        page.wait_for_selector("#profile-select", timeout=15_000)
+        meta = page.evaluate("fetch('/api/meta', {headers: {'X-Auth-Token': localStorage.getItem('imagegen-token')}}).then(r => r.json())")
+        self.assertTrue(meta["is_admin"])
+        # 横幅消失（不再是 open 模式），管理区就位
+        self.assertTrue(page.locator("#setup-hint").is_hidden())
+        page.locator("summary", has_text="网关配置").click()
+        page.wait_for_selector("#users-admin:not(.hidden)")
+
+
 if __name__ == "__main__":
     unittest.main()

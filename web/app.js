@@ -116,6 +116,7 @@ function toast(message, type = "info", action = null) {
 
 async function loadMeta() {
   META = await api("/api/meta");
+  renderSetupHint();
   if (META.version) {
     if (!PAGE_VERSION) PAGE_VERSION = META.version; // 页面资源来自首次加载的那一版
     SERVER_VERSION = META.version;
@@ -1255,14 +1256,18 @@ async function createInvite() {
 /* ---------- 邀请码激活（?invite=CODE 进来的新用户） ---------- */
 
 let INVITE_CODE = ""; // 从 ?invite= 带进来的激活码
+let SETUP_CODE_PARAM = ""; // 从 ?setup= 带进来的初始化码
 
-function setupInviteFlow() {
+function setupUrlParams() {
   try {
     const params = new URLSearchParams(location.search);
-    const code = (params.get("invite") || "").trim().toUpperCase();
-    if (!code) return;
-    INVITE_CODE = code;
+    const invite = (params.get("invite") || "").trim().toUpperCase();
+    const setup = (params.get("setup") || "").trim();
+    if (invite) INVITE_CODE = invite;
+    if (setup) SETUP_CODE_PARAM = setup;
+    if (!invite && !setup) return;
     params.delete("invite");
+    params.delete("setup");
     const rest = params.toString();
     history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
   } catch (e) {
@@ -1307,19 +1312,72 @@ function loginWithToken() {
   location.reload();
 }
 
+/* ---------- 首次引导：全新实例用控制台码创建管理员 ---------- */
+
+function renderSetupHint() {
+  const banner = $("setup-hint");
+  if (banner) banner.classList.toggle("hidden", META.auth_mode !== "open");
+}
+
+function openSetupDialog(prefill) {
+  $("setup-backdrop").classList.remove("hidden");
+  $("setup-dialog").classList.remove("hidden");
+  $("setup-go").disabled = false;
+  $("setup-msg").textContent = "";
+  if (prefill) $("setup-code").value = prefill;
+  api("/api/setup/status").then((s) => {
+    if (!s.needed) {
+      $("setup-msg").textContent = "实例已初始化过，此入口已关闭。";
+      $("setup-go").disabled = true;
+    }
+  }).catch(() => { /* ignore */ });
+}
+
+function closeSetupDialog() {
+  $("setup-backdrop").classList.add("hidden");
+  $("setup-dialog").classList.add("hidden");
+}
+
+async function setupAdmin() {
+  const code = ($("setup-code").value || "").trim();
+  const name = ($("setup-name").value || "").trim();
+  if (!code || !name) {
+    $("setup-msg").textContent = "初始化码和管理员名都要填。";
+    return;
+  }
+  $("setup-go").disabled = true;
+  try {
+    const r = await api("/api/setup/admin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, name }),
+    });
+    try {
+      localStorage.setItem("imagegen-token", r.token);
+    } catch (e) {
+      /* ignore */
+    }
+    location.reload();
+  } catch (e) {
+    $("setup-go").disabled = false;
+    $("setup-msg").textContent = e.message;
+  }
+}
+
 /* ---------- wiring ---------- */
 
 async function init() {
   // 先绑事件再拉数据：无令牌首访时 loadMeta 会 401，
   // 令牌面板的保存/清除按钮必须已可用，否则认证提示引导的是一条死路
   bindEvents();
-  setupInviteFlow();
+  setupUrlParams();
   loadDraft();
   renderTokenState();
   try {
     await loadMeta();
     renderProfiles();
     renderUsers();
+    if (SETUP_CODE_PARAM) openSetupDialog(SETUP_CODE_PARAM);
     watchVersion();
     await loadHistory();
     refreshProjectDatalist();
@@ -1343,6 +1401,12 @@ function bindEvents() {
   }
   $("login-activate").addEventListener("click", loginActivate);
   $("login-token-go").addEventListener("click", loginWithToken);
+  $("setup-open").addEventListener("click", (e) => {
+    e.preventDefault();
+    openSetupDialog(SETUP_CODE_PARAM);
+  });
+  $("setup-go").addEventListener("click", setupAdmin);
+  $("setup-backdrop").addEventListener("click", closeSetupDialog);
   $("user-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = $("user-name").value.trim();
@@ -1419,6 +1483,10 @@ function bindEvents() {
   document.addEventListener("keydown", (e) => {
     const lightboxOpen = !$("lightbox").classList.contains("hidden");
     if (e.key === "Escape") {
+      if (!$("setup-dialog").classList.contains("hidden")) {
+        closeSetupDialog();
+        return;
+      }
       if (!$("update-panel").classList.contains("hidden")) {
         $("update-panel").classList.add("hidden"); // 先关更新面板
         return;
