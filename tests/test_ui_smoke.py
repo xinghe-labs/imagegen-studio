@@ -417,7 +417,7 @@ class TokenModeUITest(unittest.TestCase):
         page.click('.login-tab[data-login-tab="token"]')
         page.fill("#login-token-input", TOKEN_VALUE)
         page.click("#login-token-go")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_selector("#profile-select", timeout=15_000)
         self.assertEqual(page.evaluate("localStorage.getItem('imagegen-token')"), TOKEN_VALUE)
         self.assertTrue(page.locator("#auth-hint").is_hidden())
         self.assertIn("✓key", page.locator("#profile-select").inner_text())
@@ -692,11 +692,10 @@ class UsersAdminUITest(unittest.TestCase):
         newbie.click("#login-activate")
         newbie.wait_for_timeout(600)
         self.assertIn("邀请码", newbie.locator("#login-msg").inner_text())
-        # 换回正确码 → 激活并自动登录
+        # 换回正确码 → 激活并自动登录（等元素出现，可跨 reload，无竞态）
         newbie.fill("#login-invite-code", code)
         newbie.click("#login-activate")
-        newbie.wait_for_load_state("networkidle")
-        self.assertTrue(newbie.locator("#profile-select").is_visible(), "激活后应自动登录")
+        newbie.wait_for_selector("#profile-select", timeout=15_000)
         newbie.close()
 
         # 管理端重新拉取用户列表，dave 应出现

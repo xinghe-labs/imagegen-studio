@@ -2,6 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的格式，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.6.1] - 2026-09-26
+
+### 修复
+
+- CI 上三平台暴露的测试竞态：激活/口令登录后用 `networkidle` 等待会在页面重载前就满足，
+  断言跑早了；改为等待 `#profile-select` 出现（可跨 reload，无竞态）
+
 ## [1.6.0] - 2026-09-26
 
 ### 新增
