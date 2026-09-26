@@ -20,6 +20,7 @@ import io
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
@@ -57,7 +58,7 @@ def resolve_cli() -> Path:
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 SIDECAR_RECORD_TYPES = {"image-gen-sidecar", "image-generation-sidecar"}
 DEFAULT_PORT = 8642
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.4.0"
 
 
 def default_library() -> Path:
@@ -578,6 +579,11 @@ class RateRequest(BaseModel):
     rating: int = Field(ge=0, le=5)
 
 
+class UserCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=32)
+    library: str | None = None
+
+
 class PathRequest(BaseModel):
     image: str
 
@@ -610,12 +616,24 @@ def create_app(
     library.mkdir(parents=True, exist_ok=True)
     profiles_file = (profiles_path or default_profiles_path()).expanduser().resolve()
     users_file = (users_path or default_users_path()).expanduser().resolve()
-    users = load_json_file(users_file, {"users": []}).get("users", [])
-    user_by_token = {
-        str(u["token"]): u
-        for u in users
-        if isinstance(u, dict) and u.get("token") and u.get("name")
-    }
+    # users 文件运行时可变（页面管理 / CLI 都会改），按 mtime 变化热加载
+    users_state = {"mtime": None, "by_token": {}}
+
+    def reload_users_if_changed() -> None:
+        try:
+            mtime = users_file.stat().st_mtime
+        except OSError:
+            mtime = None
+        if mtime != users_state["mtime"]:
+            users = load_json_file(users_file, {"users": []}).get("users", [])
+            users_state["by_token"] = {
+                str(u["token"]): u
+                for u in users
+                if isinstance(u, dict) and u.get("token") and u.get("name")
+            }
+            users_state["mtime"] = mtime
+
+    reload_users_if_changed()
     auth_token = token or os.environ.get("IMAGE_GEN_TOKEN") or ""
     jobs = JobManager(max_concurrent=2)
     app = FastAPI(title="imagegen studio", docs_url=None, redoc_url=None)
@@ -651,13 +669,14 @@ def create_app(
         # 只保护 /api/*：静态页面（index/app.js/style.css）不含任何密钥，
         # 让页面永远能打开，令牌没配/配错时由界面提示并可当场修改——
         # 否则输错令牌重载后只会看到一页 401，UI 再也进不去（还得跟限流赛跑）。
-        if (user_by_token or auth_token) and request.url.path.startswith("/api/"):
+        if (users_state["by_token"] or auth_token) and request.url.path.startswith("/api/"):
             ip = request.client.host if request.client else "?"
             provided = request.headers.get("X-Auth-Token") or request.query_params.get("token")
             if auth_locked(ip):
                 return JSONResponse({"detail": "认证失败次数过多，请稍后再试"}, status_code=429)
-            if user_by_token:
-                user = user_by_token.get(provided or "")
+            if users_state["by_token"]:
+                reload_users_if_changed()
+                user = users_state["by_token"].get(provided or "")
                 if user is None:
                     auth_failed(ip)
                     return JSONResponse({"detail": "unauthorized"}, status_code=401)
@@ -696,9 +715,14 @@ def create_app(
         profiles = load_profiles(profiles_file)
         profile = active_profile(profiles)
         base_url = profile.get("base_url") if profile else None
+        users = load_json_file(users_file, {"users": []}).get("users", [])
+        provided = request.headers.get("X-Auth-Token") or request.query_params.get("token") or ""
+        me = next((u for u in users if str(u.get("token")) == provided), None)
         return {
             "app": "imagegen studio",
             "version": APP_VERSION,
+            "auth_mode": "users" if users else ("token" if auth_token else "open"),
+            "is_admin": bool(me and me.get("admin")),
             "library": str(req_library(request)),
             "user": getattr(request.state, "user", None),
             "presets": ["fast", "standard", "transparent"],
@@ -938,6 +962,88 @@ def create_app(
             profiles["active"] = profiles["profiles"][0]["name"] if profiles["profiles"] else None
         save_profiles(profiles_file, profiles)
         return {"deleted": name, "profiles": masked_profiles(profiles)}
+
+    # ---------- 用户与令牌管理（users 模式 + 管理员令牌） ----------
+
+    USER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+    def users_admin_guard(request: Request) -> list[dict[str, Any]]:
+        reload_users_if_changed()
+        users = load_json_file(users_file, {"users": []}).get("users", [])
+        if not users:
+            raise HTTPException(403, "未启用多用户模式（users 文件为空）")
+        provided = request.headers.get("X-Auth-Token") or request.query_params.get("token") or ""
+        me = next((u for u in users if str(u.get("token")) == provided), None)
+        if me is None:
+            raise HTTPException(401, "unauthorized")
+        if not me.get("admin"):
+            raise HTTPException(403, "需要管理员令牌")
+        return users
+
+    def save_users_file(users: list[dict[str, Any]]) -> None:
+        save_json_file(users_file, {"users": users})
+        reload_users_if_changed()
+
+    def invite_link(request: Request, token: str) -> str:
+        host = request.headers.get("host") or request.url.netloc
+        scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
+        return f"{scheme}://{host}/?token={token}"
+
+    @app.get("/api/users")
+    async def list_users(request: Request) -> dict[str, Any]:
+        users = users_admin_guard(request)
+        me = request.headers.get("X-Auth-Token") or request.query_params.get("token") or ""
+        return {
+            "users": [
+                {
+                    "name": u.get("name"),
+                    "library": u.get("library"),
+                    "admin": bool(u.get("admin")),
+                    "token": str(u.get("token") or ""),
+                    "is_me": str(u.get("token")) == me,
+                }
+                for u in users
+            ]
+        }
+
+    @app.post("/api/users")
+    async def create_user(request: Request, payload: UserCreateRequest) -> dict[str, Any]:
+        users = users_admin_guard(request)
+        if not USER_NAME_RE.fullmatch(payload.name):
+            raise HTTPException(422, "用户名限 1-32 位字母/数字/下划线/连字符")
+        if any(u.get("name") == payload.name for u in users):
+            raise HTTPException(409, f"用户已存在: {payload.name}")
+        token = secrets.token_urlsafe(24)
+        entry: dict[str, Any] = {"name": payload.name, "token": token}
+        if payload.library:
+            entry["library"] = payload.library
+        users.append(entry)
+        save_users_file(users)
+        return {"name": payload.name, "token": token, "link": invite_link(request, token)}
+
+    @app.post("/api/users/{name}/rotate")
+    async def rotate_user_token(name: str, request: Request) -> dict[str, Any]:
+        users = users_admin_guard(request)
+        target = next((u for u in users if u.get("name") == name), None)
+        if target is None:
+            raise HTTPException(404, f"用户不存在: {name}")
+        token = secrets.token_urlsafe(24)
+        target["token"] = token
+        save_users_file(users)
+        return {"name": name, "token": token, "link": invite_link(request, token)}
+
+    @app.delete("/api/users/{name}")
+    async def remove_user(name: str, request: Request) -> dict[str, Any]:
+        users = users_admin_guard(request)
+        provided = request.headers.get("X-Auth-Token") or request.query_params.get("token") or ""
+        me = next((u for u in users if str(u.get("token")) == provided), None)
+        if me and me.get("name") == name:
+            raise HTTPException(400, "不能移除自己")
+        remaining = [u for u in users if u.get("name") != name]
+        if len(remaining) == len(users):
+            raise HTTPException(404, f"用户不存在: {name}")
+        save_users_file(remaining)
+        return {"removed": name}
 
     @app.post("/api/edit")
     async def edit_images(

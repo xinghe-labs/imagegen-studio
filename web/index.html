@@ -106,11 +106,22 @@
       </form>
       <p class="muted">key 只存在本机服务端配置文件里，页面永不回传。</p>
       <div class="field-row">
-        <label class="field">访问令牌<input id="token-input" type="password" placeholder="留空 = 不需要令牌"></label>
+        <label class="field">访问令牌<input id="token-input" type="password" placeholder="留空 = 不需要令牌" title="服务器开启认证后，管理员发给你的访问口令（形如 ?token=链接里的那串）；粘贴到这里保存，只存本浏览器"></label>
         <button id="token-save" type="button" class="btn-small">保存令牌并重载</button>
         <button id="token-clear" type="button" class="btn-small danger">清除令牌</button>
       </div>
       <p id="token-state" class="muted"></p>
+      <div id="users-admin" class="hidden">
+        <div class="gen-group-head"><span class="gen-group-label">用户与令牌管理</span></div>
+        <div id="users-list"></div>
+        <form id="user-form" class="field-row">
+          <label class="field">用户名<input id="user-name" placeholder="如 alice" required></label>
+          <label class="field">图库目录（可选）<input id="user-library" placeholder="留空 = <图库>/<用户名>"></label>
+          <button type="submit" class="btn-small">添加用户</button>
+        </form>
+        <div id="user-result" class="user-result hidden"></div>
+        <p class="muted">换发令牌后旧令牌立即失效；移除用户不动其图库文件。命令行等价：<code>add_user.py</code></p>
+      </div>
     </details>
     <div id="latest"></div>
     </div>

@@ -726,11 +726,10 @@ function variantFrom(record) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-async function copyPrompt(text) {
-  if (!text) return;
+async function copyText(text, label = "内容") {
   try {
     await navigator.clipboard.writeText(text);
-    toast("提示词已复制", "success");
+    toast(`${label}已复制`, "success");
     return;
   } catch (e) {
     /* 无用户手势 / 权限被拒时回退到 execCommand */
@@ -743,10 +742,15 @@ async function copyPrompt(text) {
     area.select();
     const ok = document.execCommand("copy");
     area.remove();
-    toast(ok ? "提示词已复制" : "复制失败（浏览器限制剪贴板）", ok ? "success" : "error");
+    toast(ok ? `${label}已复制` : "复制失败（浏览器限制剪贴板）", ok ? "success" : "error");
   } catch (e) {
     toast("复制失败（浏览器限制剪贴板）", "error");
   }
+}
+
+async function copyPrompt(text) {
+  if (!text) return;
+  await copyText(text, "提示词");
 }
 
 function referenceFrom(record) {
@@ -1003,6 +1007,79 @@ function toggleUpdatePanel(force) {
   if (show) renderUpdateState();
 }
 
+/* ---------- 用户与令牌管理（管理员，users 模式） ---------- */
+
+function maskToken(token) {
+  return token.length > 12 ? `${token.slice(0, 6)}…${token.slice(-4)}` : "…";
+}
+
+async function renderUsers() {
+  const wrap = $("users-admin");
+  if (!wrap) return;
+  wrap.classList.toggle("hidden", !META.is_admin);
+  if (!META.is_admin) return;
+  const list = $("users-list");
+  try {
+    const data = await api("/api/users");
+    list.innerHTML = data.users.map((u) => `
+      <div class="user-row" data-name="${esc(u.name)}">
+        <span class="user-name">${esc(u.name)}${u.admin ? " · 管理员" : ""}${u.is_me ? "（我）" : ""}</span>
+        <span class="muted user-token">token ${maskToken(u.token)}</span>
+        <span class="muted">${esc(u.library || `默认图库/${u.name}`)}</span>
+        <span class="user-actions">
+          <button type="button" data-act="reveal" data-token="${esc(u.token)}">显示</button>
+          <button type="button" data-act="link" data-token="${esc(u.token)}">邀请链接</button>
+          <button type="button" data-act="rotate" data-name="${esc(u.name)}">换发</button>
+          ${u.is_me ? "" : `<button type="button" data-act="remove" data-name="${esc(u.name)}">移除</button>`}
+        </span>
+      </div>`).join("");
+    for (const btn of list.querySelectorAll("button[data-act]")) {
+      btn.addEventListener("click", () => onUserAction(btn));
+    }
+  } catch (e) {
+    list.innerHTML = `<p class="muted">用户列表加载失败：${esc(e.message)}</p>`;
+  }
+}
+
+async function onUserAction(btn) {
+  const act = btn.dataset.act;
+  try {
+    if (act === "reveal") {
+      const span = btn.closest(".user-row").querySelector(".user-token");
+      const shown = span.dataset.full === "1";
+      span.textContent = shown ? `token ${maskToken(btn.dataset.token)}` : `token ${btn.dataset.token}`;
+      span.dataset.full = shown ? "" : "1";
+      btn.textContent = shown ? "显示" : "隐藏";
+    } else if (act === "link") {
+      await copyText(`${location.origin}/?token=${btn.dataset.token}`, "邀请链接");
+    } else if (act === "rotate") {
+      if (!window.confirm(`换发 ${btn.dataset.name} 的令牌？旧令牌立即失效。`)) return;
+      const r = await api(`/api/users/${encodeURIComponent(btn.dataset.name)}/rotate`, { method: "POST" });
+      showUserResult(`${r.name} 的新令牌已生成`, r.link);
+      await loadMeta();
+      await renderUsers();
+    } else if (act === "remove") {
+      if (!window.confirm(`移除用户 ${btn.dataset.name}？（其图库文件不动）`)) return;
+      await api(`/api/users/${encodeURIComponent(btn.dataset.name)}`, { method: "DELETE" });
+      toast(`已移除 ${btn.dataset.name}`, "success");
+      await renderUsers();
+    }
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+function showUserResult(title, link) {
+  const box = $("user-result");
+  box.classList.remove("hidden");
+  box.innerHTML = `
+    <b>${esc(title)}</b>
+    <div class="user-result-link">${esc(link)}</div>
+    <button type="button" id="user-copy" class="btn-small">复制邀请链接</button>
+    <span class="muted">令牌也可随时在上方列表点「显示」查看</span>`;
+  $("user-copy").addEventListener("click", () => copyText(link, "邀请链接"));
+}
+
 /* ---------- wiring ---------- */
 
 async function init() {
@@ -1014,6 +1091,7 @@ async function init() {
   try {
     await loadMeta();
     renderProfiles();
+    renderUsers();
     watchVersion();
     await loadHistory();
     refreshProjectDatalist();
@@ -1027,6 +1105,25 @@ function bindEvents() {
   $("cancel-job").addEventListener("click", cancelJob);
   $("token-save").addEventListener("click", saveToken);
   $("token-clear").addEventListener("click", clearToken);
+  $("user-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("user-name").value.trim();
+    const library = $("user-library").value.trim();
+    try {
+      const r = await api("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, library: library || null }),
+      });
+      $("user-name").value = "";
+      $("user-library").value = "";
+      showUserResult(`已添加 ${r.name}`, r.link);
+      await loadMeta();
+      await renderUsers();
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  });
   // 版本徽章与更新面板
   $("app-version").addEventListener("click", (e) => {
     e.stopPropagation();

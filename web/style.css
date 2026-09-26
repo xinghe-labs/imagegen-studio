@@ -121,6 +121,32 @@ header {
 .update-changelog { display: block; text-align: center; color: var(--muted); font-size: 12px; text-decoration: none; }
 .update-changelog:hover { color: var(--text); }
 
+/* ---------- 用户与令牌管理 ---------- */
+
+.user-row {
+  display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; padding: 8px 10px;
+  background: var(--input); border: 1px solid var(--border); border-radius: 9px;
+  font-size: 13px;
+}
+.user-row .user-name { font-weight: 600; }
+.user-row .user-token { word-break: break-all; }
+.user-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.user-actions button {
+  background: none; border: 1px solid var(--border-strong); color: var(--muted);
+  border-radius: 7px; font-size: 12px; padding: 3px 8px; cursor: pointer;
+}
+.user-actions button:hover { color: var(--text); border-color: var(--accent); }
+.user-actions button[data-act="remove"]:hover { color: var(--danger); border-color: var(--danger); }
+.user-result {
+  background: var(--accent-dim); border: 1px solid var(--border-strong); border-radius: 9px;
+  padding: 10px 12px; margin-bottom: 8px; font-size: 13px;
+}
+.user-result-link {
+  font-family: Consolas, monospace; font-size: 12px; word-break: break-all;
+  margin: 6px 0; color: var(--text);
+}
+.user-result .btn-small { margin-right: 8px; }
+
 .header-info { display: flex; align-items: center; gap: 14px; min-width: 0; }
 #profile-select { min-width: 160px; max-width: 320px; }
 #profile-select:disabled { opacity: 0.7; cursor: default; }

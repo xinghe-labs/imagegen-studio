@@ -56,8 +56,9 @@ key 永不出现在任何 API 响应中；更新 profile 时 key 留空即保留
 
 ```bash
 python scripts/add_user.py add alice --base-url https://img.example.com   # 生成 token 并打印访问链接
-python scripts/add_user.py list                                          # 查看（token 打码）
-python scripts/add_user.py remove alice                                  # 移除（图库文件不动）
+python scripts/add_user.py add admin1 --admin                             # 管理员：可在页面管理用户
+python scripts/add_user.py list                                           # 查看（token 打码）
+python scripts/add_user.py remove alice                                   # 移除（图库文件不动）
 ```
 
 也可以手写 users 文件：
@@ -72,6 +73,7 @@ python scripts/add_user.py remove alice                                  # 移�
 ```
 
 - 每个用户用**自己的 token** 访问同一地址：`https://img.example.com/?token=随机串A`（页面把 token 存进 localStorage，之后所有请求自动带上，并清掉地址栏里的 token）；
+- **管理员**：users 文件里带 `"admin": true` 的用户（或 `add_user.py add ... --admin`），登录后「网关配置」面板出现**用户与令牌管理**区——添加用户、复制邀请链接、换发令牌（旧的立即失效）、移除用户（不动图库文件），改动即时生效无需重启；
 - 各自的图库互相不可见：历史、统计、生成产物、参考图都落在自己的库目录里；跨库读图/删除/改评分会被拒（403）；
 - 未写 `library` 的用户落在 `<IMAGE_GEN_LIBRARY>/<name>`（默认 `~/Pictures/imagegen/<name>`）；
 - 配置了 users 文件后，**users 模式优先于单 token**（`IMAGE_GEN_TOKEN` 忽略）；错误或缺失 token 一律 401；

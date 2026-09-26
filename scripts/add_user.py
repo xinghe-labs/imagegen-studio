@@ -19,6 +19,7 @@ import os
 import secrets
 import sys
 from pathlib import Path
+from typing import Any
 
 
 def default_users_path() -> Path:
@@ -60,13 +61,15 @@ def cmd_add(args: argparse.Namespace, path: Path) -> int:
         print(f"用户已存在: {args.name}（先 remove 再 add 可换 token）", file=sys.stderr)
         return 1
     token = args.token or secrets.token_urlsafe(24)
-    entry: dict[str, str] = {"name": args.name, "token": token}
+    entry: dict[str, Any] = {"name": args.name, "token": token}
+    if args.admin:
+        entry["admin"] = True
     if args.library:
         entry["library"] = args.library
     users.append(entry)
     save_users(path, data)
     base = args.base_url.rstrip("/") if args.base_url else "http://127.0.0.1:8642"
-    print(f"已添加 {args.name} → {path}")
+    print(f"已添加 {args.name}{'（管理员）' if args.admin else ''} → {path}")
     print(f"  访问链接: {base}/?token={token}")
     if args.library:
         print(f"  图库: {args.library}")
@@ -108,6 +111,7 @@ def main() -> int:
     add.add_argument("name")
     add.add_argument("--library", help="该用户的图库目录（默认 <IMAGE_GEN_LIBRARY>/<name>）")
     add.add_argument("--token", help="指定 token（默认随机生成）")
+    add.add_argument("--admin", action="store_true", help="设为管理员（可在页面管理用户与令牌）")
     add.add_argument("--base-url", help="打印访问链接用的地址，如 https://img.example.com")
     add.set_defaults(func=cmd_add)
 

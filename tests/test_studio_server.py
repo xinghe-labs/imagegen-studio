@@ -802,6 +802,102 @@ class ImagegenServerTest(unittest.TestCase):
             self.assertNotIn("小说A", stats["by_project"])
 
 
+class UsersAdminApiTest(unittest.TestCase):
+    """管理员令牌的页面管理 API（users 模式）。"""
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="imagegen-admin-")).resolve()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.library = self.tmpdir / "shared-root"
+        self.users_file = self.tmpdir / "users.json"
+        self.users_file.write_text(json.dumps({
+            "users": [
+                {"name": "alice", "token": "tok-alice", "admin": True},
+                {"name": "bob", "token": "tok-bob"},
+                {"name": "carol", "token": "tok-carol"},
+            ]
+        }), encoding="utf-8")
+        app = server_module.create_app(
+            library_root=self.library, profiles_path=self.tmpdir / "profiles-absent.json",
+            users_path=self.users_file,
+        )
+        self.client = TestClient(app)
+
+    def auth(self, token: str) -> dict:
+        return {"X-Auth-Token": token}
+
+    def test_meta_reports_mode_and_admin_flag(self) -> None:
+        meta = self.client.get("/api/meta", headers=self.auth("tok-alice")).json()
+        self.assertEqual(meta["auth_mode"], "users")
+        self.assertTrue(meta["is_admin"])
+        meta_bob = self.client.get("/api/meta", headers=self.auth("tok-bob")).json()
+        self.assertFalse(meta_bob["is_admin"])
+        self.assertEqual(self.client.get("/api/meta", headers=self.auth("wrong")).status_code, 401)
+
+    def test_list_requires_admin(self) -> None:
+        self.assertEqual(self.client.get("/api/users").status_code, 401)
+        self.assertEqual(self.client.get("/api/users", headers=self.auth("tok-bob")).status_code, 403)
+        data = self.client.get("/api/users", headers=self.auth("tok-alice")).json()
+        self.assertEqual([u["name"] for u in data["users"]], ["alice", "bob", "carol"])
+        alice = next(u for u in data["users"] if u["name"] == "alice")
+        self.assertTrue(alice["admin"])
+        self.assertTrue(alice["is_me"])
+        self.assertEqual(alice["token"], "tok-alice")  # 管理员可见完整 token
+
+    def test_users_mode_required(self) -> None:
+        empty_users = self.tmpdir / "empty-users.json"
+        empty_users.write_text(json.dumps({"users": []}), encoding="utf-8")
+        app = server_module.create_app(
+            library_root=self.tmpdir / "l2", profiles_path=self.tmpdir / "profiles-absent.json",
+            users_path=empty_users,
+        )
+        client = TestClient(app)
+        response = client.get("/api/users")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("多用户", response.json()["detail"])
+
+    def test_add_user_roundtrip_and_validation(self) -> None:
+        response = self.client.post(
+            "/api/users", json={"name": "dave"}, headers=self.auth("tok-alice"))
+        self.assertEqual(response.status_code, 200)
+        token = response.json()["token"]
+        self.assertTrue(token)
+        self.assertIn("/?token=", response.json()["link"])
+        # 新 token 立即可用（热加载，无需重启）
+        meta = self.client.get("/api/meta", headers=self.auth(token)).json()
+        self.assertEqual(meta["user"], "dave")
+        # users 文件已持久化
+        persisted = json.loads(self.users_file.read_text(encoding="utf-8"))
+        self.assertIn("dave", [u["name"] for u in persisted["users"]])
+        # 校验：重名 409 / 非法用户名 422 / 非 admin 403
+        self.assertEqual(self.client.post("/api/users", json={"name": "dave"},
+                                          headers=self.auth("tok-alice")).status_code, 409)
+        self.assertEqual(self.client.post("/api/users", json={"name": "坏 名字"},
+                                          headers=self.auth("tok-alice")).status_code, 422)
+        self.assertEqual(self.client.post("/api/users", json={"name": "eve"},
+                                          headers=self.auth("tok-bob")).status_code, 403)
+
+    def test_rotate_invalidates_old_token(self) -> None:
+        response = self.client.post("/api/users/bob/rotate", headers=self.auth("tok-alice"))
+        self.assertEqual(response.status_code, 200)
+        new_token = response.json()["token"]
+        self.assertEqual(self.client.get("/api/meta", headers=self.auth("tok-bob")).status_code, 401)
+        self.assertEqual(self.client.get("/api/meta", headers=self.auth(new_token)).status_code, 200)
+        self.assertEqual(self.client.post("/api/users/nobody/rotate",
+                                          headers=self.auth("tok-alice")).status_code, 404)
+
+    def test_remove_user_keeps_library_files(self) -> None:
+        carol_dir = self.library / "carol"
+        carol_dir.mkdir(parents=True, exist_ok=True)
+        (carol_dir / "keep.png").write_bytes(b"png")
+        response = self.client.delete("/api/users/carol", headers=self.auth("tok-alice"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get("/api/meta", headers=self.auth("tok-carol")).status_code, 401)
+        self.assertTrue((carol_dir / "keep.png").is_file(), "移除用户不动图库文件")
+        # 不能移除自己
+        self.assertEqual(self.client.delete("/api/users/alice", headers=self.auth("tok-alice")).status_code, 400)
+        self.assertEqual(self.client.delete("/api/users/nobody", headers=self.auth("tok-alice")).status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

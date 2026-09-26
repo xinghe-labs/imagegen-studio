@@ -2,6 +2,17 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的格式，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.4.0] - 2026-09-26
+
+### 新增
+
+- **管理员页面管理用户与令牌**：users 文件里带 `"admin": true` 的用户（或 `add_user.py add ... --admin`）
+  登录后，「网关配置」面板出现「用户与令牌管理」区——添加用户并复制邀请链接、查看完整令牌、
+  换发令牌（旧的立即失效）、移除用户（不动图库文件）；users 文件按 mtime 热加载，改动即时生效无需重启，
+  与 `add_user.py` 命令行改动互通
+- `/api/meta` 新增 `auth_mode`（users / token / open）与 `is_admin`；管理 API 仅限 users 模式下的管理员令牌
+  （`GET/POST /api/users`、`POST /api/users/{name}/rotate`、`DELETE /api/users/{name}`，不能移除自己）
+
 ## [1.3.1] - 2026-09-26
 
 ### 变更

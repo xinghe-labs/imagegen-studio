@@ -521,5 +521,81 @@ class UpdatePromptUITest(unittest.TestCase):
             server_module.APP_VERSION = self._original_version
 
 
+class UsersAdminUITest(unittest.TestCase):
+    """管理员在页面上管理用户与令牌（users 模式，v1.4.0）。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        try:
+            cls._pw = sync_playwright().start()
+            cls.browser = cls._pw.chromium.launch(headless=True)
+        except Exception as exc:
+            raise unittest.SkipTest(f"playwright 浏览器不可用：{exc}")
+        # 类清理按 LIFO 执行：先注册 pw.stop（最后执行），browser.close 才能先跑
+        cls.addClassCleanup(cls._pw.stop)
+        cls.addClassCleanup(cls.browser.close)
+
+        cls.tmpdir = Path(tempfile.mkdtemp(prefix="imagegen-ui-users-")).resolve()
+        cls.addClassCleanup(shutil.rmtree, cls.tmpdir, ignore_errors=True)
+        profiles_path = cls.tmpdir / "profiles.json"
+        profiles_path.write_text(
+            json.dumps({
+                "profiles": [{"name": "test", "base_url": "https://gateway.example/v1", "api_key": SECRET_KEY}],
+                "active": "test",
+            }),
+            encoding="utf-8",
+        )
+        cls.users_file = cls.tmpdir / "users.json"
+        cls.users_file.write_text(
+            json.dumps({"users": [{"name": "alice", "token": "tok-alice-admin", "admin": True}]}),
+            encoding="utf-8",
+        )
+        app = server_module.create_app(
+            library_root=cls.tmpdir / "library",
+            profiles_path=profiles_path,
+            users_path=cls.users_file,
+        )
+        cls.http = _UvicornThread(app)
+        cls.http.__enter__()
+        cls.addClassCleanup(cls.http.__exit__, None, None, None)
+
+    def setUp(self) -> None:
+        context = self.browser.new_context()
+        context.on("dialog", lambda dialog: dialog.accept())
+        self.addCleanup(context.close)
+        self.page = context.new_page()
+
+    def test_admin_manages_users_in_page(self) -> None:
+        page = self.page
+        page.goto(f"{self.http.base_url}?token=tok-alice-admin")
+        page.wait_for_load_state("networkidle")
+        page.locator("summary", has_text="网关配置").click()
+        admin_section = page.locator("#users-admin")
+        page.wait_for_selector("#users-admin:not(.hidden)")
+        # 添加用户 bob → 出现邀请链接，列表多一行
+        page.fill("#user-name", "bob")
+        page.click('#user-form button[type="submit"]')
+        page.wait_for_selector("#user-result:not(.hidden)")
+        link = page.locator(".user-result-link").inner_text()
+        self.assertIn("/?token=", link)
+        page.wait_for_selector('#users-list .user-row[data-name="bob"]')
+        # 非 admin 用户看不到管理区
+        other = self.browser.new_context().new_page()
+        other.goto(f"{self.http.base_url}?token={link.split('token=')[1]}")
+        other.wait_for_load_state("networkidle")
+        other.locator("summary", has_text="网关配置").click()
+        self.assertTrue(other.locator("#users-admin").get_attribute("class").find("hidden") >= 0)
+        # bob 的令牌确实可用（meta 正常加载且非管理员）
+        self.assertEqual(other.locator("#profile-select").inner_text().find("✓key") >= 0, True)
+        other.close()
+        # 移除 bob（confirm 自动接受）→ 行消失
+        page.locator('#users-list .user-row[data-name="bob"]').locator('button[data-act="remove"]').click()
+        page.wait_for_timeout(600)
+        self.assertEqual(page.locator('#users-list .user-row[data-name="bob"]').count(), 0)
+        # users 文件同步持久化
+        persisted = json.loads(self.users_file.read_text(encoding="utf-8"))
+        self.assertEqual([u["name"] for u in persisted["users"]], ["alice"])
+
+
 if __name__ == "__main__":
     unittest.main()
