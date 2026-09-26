@@ -899,5 +899,134 @@ class UsersAdminApiTest(unittest.TestCase):
         self.assertEqual(self.client.delete("/api/users/nobody", headers=self.auth("tok-alice")).status_code, 404)
 
 
+class FakeProc:
+    def __init__(self, stdout: str = "", stderr: str = "", returncode: int = 0) -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+
+
+class SelfUpdateApiTest(unittest.TestCase):
+    """服务端自助更新：护栏矩阵 + 成功链路（git/pip/重启全部打桩）。"""
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="imagegen-selfup-")).resolve()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.restarts: list[bool] = []
+        self.git_calls: list[list[str]] = []
+        self._originals = {n: getattr(server_module, n) for n in
+                           ("git_run", "install_requirements", "perform_restart", "fetch_latest_upstream")}
+        self.addCleanup(self._restore)
+        server_module.perform_restart = self._fake_restart
+
+    def _restore(self) -> None:
+        for name, fn in self._originals.items():
+            setattr(server_module, name, fn)
+
+    def _fake_restart(self) -> None:
+        self.restarts.append(True)
+
+    def patch_git(self, rev_list: str = "2", dirty: str = "", fail: str | None = None,
+                  pip_rc: int = 0) -> None:
+        def fake_git(args: list[str], timeout: float = 90.0):
+            self.git_calls.append(list(args))
+            if args[0] == "rev-parse":
+                return FakeProc("true\n")
+            if args[0] == "status":
+                return FakeProc(dirty)
+            if args[0] == "fetch":
+                return FakeProc("", "network error") if fail == "fetch" else FakeProc()
+            if args[0] == "rev-list":
+                return FakeProc(f"{rev_list}\n")
+            if args[0] == "pull":
+                return FakeProc("", "conflict", 1) if fail == "pull" else FakeProc("Fast-forward\n")
+            return FakeProc()
+
+        def fake_pip():
+            return FakeProc("", "pip boom", pip_rc)
+
+        async def fake_fetch(force: bool = False):
+            return {"ok": True, "latest_upstream": "9.9.9"}
+
+        server_module.git_run = fake_git
+        server_module.install_requirements = fake_pip
+        server_module.fetch_latest_upstream = fake_fetch
+
+    def make_client(self, token: str | None = None, users_file: Path | None = None):
+        app = server_module.create_app(
+            library_root=self.tmpdir / "lib", profiles_path=self.tmpdir / "profiles-absent.json",
+            token=token, users_path=users_file,
+        )
+        return TestClient(app)
+
+    def test_open_mode_forbidden(self) -> None:
+        client = self.make_client()
+        response = client.post("/api/self-update")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("未启用认证", response.json()["detail"])
+
+    def test_users_mode_requires_admin(self) -> None:
+        users_file = self.tmpdir / "users.json"
+        users_file.write_text(json.dumps({
+            "users": [{"name": "alice", "token": "tok-a", "admin": True}, {"name": "bob", "token": "tok-b"}],
+        }), encoding="utf-8")
+        client = self.make_client(users_file=users_file)
+        self.assertEqual(client.post("/api/self-update", headers={"X-Auth-Token": "tok-b"}).status_code, 403)
+        meta_bob = client.get("/api/meta", headers={"X-Auth-Token": "tok-b"}).json()
+        self.assertFalse(meta_bob["self_update_allowed"])
+        meta_alice = client.get("/api/meta", headers={"X-Auth-Token": "tok-a"}).json()
+        self.assertTrue(meta_alice["self_update_allowed"])
+
+    def test_success_flow_pulls_and_restarts(self) -> None:
+        self.patch_git(rev_list="2")
+        client = self.make_client(token="tok-admin")
+        response = client.post("/api/self-update", headers={"X-Auth-Token": "tok-admin"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["updating"])
+        self.assertTrue(self.restarts, "成功后应触发重启")
+        self.assertIn("pull", [c[0] for c in self.git_calls])
+
+    def test_already_latest_no_restart(self) -> None:
+        self.patch_git(rev_list="0")
+        client = self.make_client(token="tok-admin")
+        response = client.post("/api/self-update", headers={"X-Auth-Token": "tok-admin"})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["updating"])
+        self.assertEqual(self.restarts, [])
+
+    def test_dirty_tree_refused(self) -> None:
+        self.patch_git(dirty=" M something.py\n")
+        client = self.make_client(token="tok-admin")
+        response = client.post("/api/self-update", headers={"X-Auth-Token": "tok-admin"})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("未提交", response.json()["detail"])
+        self.assertEqual(self.restarts, [])
+
+    def test_pull_failure_refused(self) -> None:
+        self.patch_git(fail="pull")
+        client = self.make_client(token="tok-admin")
+        response = client.post("/api/self-update", headers={"X-Auth-Token": "tok-admin"})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.restarts, [])
+
+    def test_pip_failure_aborts_before_restart(self) -> None:
+        self.patch_git(pip_rc=1)
+        client = self.make_client(token="tok-admin")
+        response = client.post("/api/self-update", headers={"X-Auth-Token": "tok-admin"})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("依赖安装失败", response.json()["detail"])
+        self.assertEqual(self.restarts, [])
+
+    def test_version_check_endpoint(self) -> None:
+        self.patch_git()
+        client = self.make_client(token="tok-admin")
+        response = client.get("/api/version-check", headers={"X-Auth-Token": "tok-admin"})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["latest_upstream"], "9.9.9")
+        self.assertEqual(data["current"], server_module.APP_VERSION)
+
+
 if __name__ == "__main__":
     unittest.main()

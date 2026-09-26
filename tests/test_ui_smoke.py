@@ -400,6 +400,7 @@ class TokenModeUITest(unittest.TestCase):
 
     def setUp(self) -> None:
         context = self.browser.new_context()
+        context.on("dialog", lambda dialog: dialog.accept())
         self.addCleanup(context.close)
         self.page = context.new_page()
 
@@ -420,6 +421,47 @@ class TokenModeUITest(unittest.TestCase):
         page.click("#token-clear")
         page.wait_for_load_state("networkidle")
         self.assertIsNone(page.evaluate("localStorage.getItem('imagegen-token')"))
+
+    def test_selfupdate_button_flow(self) -> None:
+        """回归 v1.4.1：面板检测到 GitHub 新版 → 一键更新服务端（git/pip/重启打桩）。"""
+        self._originals = {
+            n: getattr(server_module, n)
+            for n in ("fetch_latest_upstream", "git_run", "install_requirements", "perform_restart")
+        }
+        self.addCleanup(self._restore_patches)
+        self.restarts: list[bool] = []
+
+        async def fake_fetch(force: bool = False):
+            return {"ok": True, "latest_upstream": "9.9.9"}
+
+        def fake_git(args, timeout: float = 90.0):
+            if args[0] == "rev-parse":
+                return type("P", (), {"returncode": 0, "stdout": "true\n", "stderr": ""})()
+            if args[0] == "status":
+                return type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+            if args[0] == "rev-list":
+                return type("P", (), {"returncode": 0, "stdout": "3\n", "stderr": ""})()
+            return type("P", (), {"returncode": 0, "stdout": "ok\n", "stderr": ""})()
+
+        server_module.fetch_latest_upstream = fake_fetch
+        server_module.git_run = fake_git
+        server_module.install_requirements = lambda: type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        server_module.perform_restart = lambda: self.restarts.append(True)
+
+        page = self.page
+        page.goto(f"{self.http.base_url}?token={TOKEN_VALUE}")  # 先登录，meta 才有 self_update_allowed
+        page.wait_for_load_state("networkidle")
+        page.click("#app-version")
+        page.wait_for_selector("#update-panel:not(.hidden)")
+        page.wait_for_selector("#update-selfupdate:not(.hidden)", timeout=8_000)
+        self.assertIn("GitHub 最新 v9.9.9", page.locator("#update-upstream").inner_text())
+        page.click("#update-selfupdate")  # confirm 对话框自动接受
+        page.wait_for_selector('.toast:has-text("服务端更新中")', timeout=8_000)
+        self.assertTrue(self.restarts, "应触发服务端重启")
+
+    def _restore_patches(self) -> None:
+        for name, fn in self._originals.items():
+            setattr(server_module, name, fn)
 
 
 class UpdatePromptUITest(unittest.TestCase):
@@ -448,6 +490,12 @@ class UpdatePromptUITest(unittest.TestCase):
         )
         cls._original_version = server_module.APP_VERSION
         cls.addClassCleanup(cls._restore_version)
+        # 更新面板打开会触发上游检查：打桩离线，避免测试真实请求 GitHub
+        async def _offline_fetch(force: bool = False):
+            return {"ok": False, "latest_upstream": None}
+        cls._original_fetch = server_module.fetch_latest_upstream
+        server_module.fetch_latest_upstream = _offline_fetch
+        cls.addClassCleanup(cls._restore_fetch)
         app = server_module.create_app(
             library_root=cls.tmpdir / "library", profiles_path=profiles_path
         )
@@ -458,6 +506,10 @@ class UpdatePromptUITest(unittest.TestCase):
     @classmethod
     def _restore_version(cls) -> None:
         server_module.APP_VERSION = cls._original_version
+
+    @classmethod
+    def _restore_fetch(cls) -> None:
+        server_module.fetch_latest_upstream = cls._original_fetch
 
     def setUp(self) -> None:
         context = self.browser.new_context()

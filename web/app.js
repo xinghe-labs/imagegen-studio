@@ -1004,7 +1004,10 @@ function toggleUpdatePanel(force) {
   const panel = $("update-panel");
   const show = force !== undefined ? force : panel.classList.contains("hidden");
   panel.classList.toggle("hidden", !show);
-  if (show) renderUpdateState();
+  if (show) {
+    renderUpdateState();
+    checkUpstream(false); // 面板打开时顺手查一次上游（服务端有 1h 缓存）
+  }
 }
 
 /* ---------- 用户与令牌管理（管理员，users 模式） ---------- */
@@ -1080,6 +1083,84 @@ function showUserResult(title, link) {
   $("user-copy").addEventListener("click", () => copyText(link, "邀请链接"));
 }
 
+let UPSTREAM_VERSION = ""; // GitHub 上的最新 tag
+
+async function checkUpstream(force) {
+  try {
+    const m = await api(`/api/version-check${force ? "?force=1" : ""}`);
+    UPSTREAM_VERSION = m.ok ? m.latest_upstream || "" : "";
+    renderUpstreamState();
+  } catch (e) {
+    /* 离线 / GitHub 不可达：忽略，下次再查 */
+  }
+}
+
+function renderUpstreamState() {
+  const el = $("update-upstream");
+  const behind = Boolean(
+    UPSTREAM_VERSION && SERVER_VERSION && compareVersions(UPSTREAM_VERSION, SERVER_VERSION) > 0
+  );
+  if (el) {
+    el.classList.toggle("hidden", !behind);
+    if (behind) {
+      el.textContent = "";
+      el.append(`GitHub 最新 v${UPSTREAM_VERSION} · `);
+      const a = document.createElement("a");
+      a.href = "https://github.com/xinghe-labs/imagegen-studio/blob/main/DEPLOY.md";
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = "部署文档";
+      el.append(a);
+    }
+  }
+  const btn = $("update-selfupdate");
+  if (btn) btn.classList.toggle("hidden", !(behind && META.self_update_allowed));
+}
+
+async function selfUpdateServer() {
+  if (!window.confirm("从 GitHub 拉取最新版本并重启服务端？\n正在进行的生成任务会中断。")) return;
+  const btn = $("update-selfupdate");
+  btn.disabled = true;
+  try {
+    const r = await api("/api/self-update", { method: "POST" });
+    if (!r.updating) {
+      btn.disabled = false;
+      toast(r.reason || "已是上游最新", "info");
+      return;
+    }
+    toast("服务端更新中，正在重启……", "success");
+    // 重启期间 meta 会暂时不可达；轮询直到服务端带着新版本回来
+    const oldServerVersion = SERVER_VERSION;
+    const deadline = Date.now() + 120_000;
+    const timer = setInterval(async () => {
+      if (Date.now() > deadline) {
+        clearInterval(timer);
+        btn.disabled = false;
+        return;
+      }
+      try {
+        const m = await api("/api/meta");
+        if (m.version && m.version !== oldServerVersion) {
+          clearInterval(timer);
+          SERVER_VERSION = m.version;
+          renderUpdateState();
+          renderUpstreamState();
+          btn.disabled = false;
+          toast(`服务端已更新到 v${m.version}`, "success", {
+            label: "刷新",
+            onClick: () => location.reload(),
+          });
+        }
+      } catch (e) {
+        /* 重启中，继续等 */
+      }
+    }, 3000);
+  } catch (e) {
+    btn.disabled = false;
+    toast(e.message, "error");
+  }
+}
+
 /* ---------- wiring ---------- */
 
 async function init() {
@@ -1133,9 +1214,10 @@ function bindEvents() {
     e.stopPropagation();
     const btn = $("update-check");
     btn.classList.add("spinning");
-    await checkForUpdate();
+    await Promise.allSettled([checkForUpdate(), checkUpstream(true)]);
     btn.classList.remove("spinning");
   });
+  $("update-selfupdate").addEventListener("click", selfUpdateServer);
   $("update-apply").addEventListener("click", () => location.reload());
   document.addEventListener("click", (e) => {
     const panel = $("update-panel");

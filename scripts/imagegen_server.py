@@ -33,6 +33,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
+import httpx
 from pydantic import BaseModel, Field
 
 def resolve_cli() -> Path:
@@ -58,7 +59,7 @@ def resolve_cli() -> Path:
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 SIDECAR_RECORD_TYPES = {"image-gen-sidecar", "image-generation-sidecar"}
 DEFAULT_PORT = 8642
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 
 
 def default_library() -> Path:
@@ -605,6 +606,53 @@ class RestoreRequest(BaseModel):
     moved: list[dict[str, str]] = Field(min_length=1, max_length=600)
 
 
+# ---------- 上游版本检查：服务端代理查 GitHub tag（离线容错，结果缓存 1 小时） ----------
+
+UPSTREAM_REPO = "xinghe-labs/imagegen-studio"
+_upstream_cache: dict[str, Any] = {"at": 0.0, "data": None}
+
+
+async def fetch_latest_upstream(force: bool = False) -> dict[str, Any]:
+    now = time.time()
+    if not force and _upstream_cache["data"] is not None and now - _upstream_cache["at"] < 3600:
+        return _upstream_cache["data"]
+    data: dict[str, Any]
+    try:
+        async with httpx.AsyncClient(timeout=6.0, headers={"User-Agent": "imagegen-studio"}) as client:
+            resp = await client.get(f"https://api.github.com/repos/{UPSTREAM_REPO}/tags?per_page=1")
+            resp.raise_for_status()
+            tags = resp.json()
+        latest = str(tags[0]["name"]).lstrip("v") if tags else None
+        data = {"ok": latest is not None, "latest_upstream": latest}
+    except Exception as exc:  # noqa: BLE001 无外网/GitHub 不可达时静默降级
+        data = {"ok": False, "latest_upstream": None, "detail": str(exc)[:160]}
+    _upstream_cache["data"] = data
+    _upstream_cache["at"] = now
+    return data
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+BRANCH = "main"
+
+
+def git_run(args: list[str], timeout: float = 90.0) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args], cwd=str(REPO_ROOT), capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=timeout,
+    )
+
+
+def install_requirements() -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-q", "-r", str(REPO_ROOT / "requirements.txt")],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+    )
+
+
+def perform_restart() -> None:
+    """原地替换进程：监听端口随 exec 释放后由新进程重新绑定。"""
+    threading.Timer(1.5, lambda: os.execv(sys.executable, [sys.executable, *sys.argv])).start()
+
 
 def create_app(
     library_root: Path | None = None,
@@ -718,11 +766,14 @@ def create_app(
         users = load_json_file(users_file, {"users": []}).get("users", [])
         provided = request.headers.get("X-Auth-Token") or request.query_params.get("token") or ""
         me = next((u for u in users if str(u.get("token")) == provided), None)
+        auth_mode = "users" if users else ("token" if auth_token else "open")
+        is_admin = bool(me and me.get("admin"))
         return {
             "app": "imagegen studio",
             "version": APP_VERSION,
-            "auth_mode": "users" if users else ("token" if auth_token else "open"),
-            "is_admin": bool(me and me.get("admin")),
+            "auth_mode": auth_mode,
+            "is_admin": is_admin,
+            "self_update_allowed": (auth_mode == "users" and is_admin) or auth_mode == "token",
             "library": str(req_library(request)),
             "user": getattr(request.state, "user", None),
             "presets": ["fast", "standard", "transparent"],
@@ -1044,6 +1095,54 @@ def create_app(
             raise HTTPException(404, f"用户不存在: {name}")
         save_users_file(remaining)
         return {"removed": name}
+
+    # ---------- 服务端自助更新（git 部署；Docker 请用定时重建） ----------
+
+    def self_update_guard(request: Request) -> None:
+        users = load_json_file(users_file, {"users": []}).get("users", [])
+        if users:
+            users_admin_guard(request)  # 多用户模式：仅管理员
+            return
+        if not auth_token:
+            raise HTTPException(403, "未启用认证：请先配置 IMAGE_GEN_TOKEN 或 users 再开放自助更新")
+        provided = request.headers.get("X-Auth-Token") or request.query_params.get("token") or ""
+        if provided != auth_token:
+            raise HTTPException(401, "unauthorized")
+
+    @app.get("/api/version-check")
+    async def version_check(force: bool = False) -> dict[str, Any]:
+        data = await fetch_latest_upstream(force)
+        return {**data, "current": APP_VERSION}
+
+    @app.post("/api/self-update")
+    async def self_update(request: Request) -> dict[str, Any]:
+        self_update_guard(request)
+        if Path("/.dockerenv").exists():
+            raise HTTPException(409, "Docker 部署不支持页内更新：请用定时任务 docker compose pull && up -d（见 DEPLOY.md §7）")
+        check = git_run(["rev-parse", "--is-inside-work-tree"])
+        if check.returncode != 0 or check.stdout.strip() != "true":
+            raise HTTPException(409, "服务端不是 git 仓库，无法自助更新（参考 DEPLOY.md §7 的部署方式）")
+        dirty = git_run(["status", "--porcelain"])
+        if dirty.returncode != 0:
+            raise HTTPException(409, f"git status 失败：{(dirty.stderr or '')[:160]}")
+        if dirty.stdout.strip():
+            raise HTTPException(409, "服务端代码有未提交的本地改动，为避免覆盖请先处理（git stash / commit）")
+        fetch = git_run(["fetch", "origin", BRANCH])
+        if fetch.returncode != 0:
+            raise HTTPException(409, f"git fetch 失败：{(fetch.stderr or '')[:160]}")
+        behind = git_run(["rev-list", "--count", f"HEAD..origin/{BRANCH}"])
+        if behind.returncode != 0:
+            raise HTTPException(409, f"git rev-list 失败：{(behind.stderr or '')[:160]}")
+        if behind.stdout.strip() == "0":
+            return {"updating": False, "reason": "服务端已是上游最新"}
+        pull = git_run(["pull", "--ff-only", "origin", BRANCH])
+        if pull.returncode != 0:
+            raise HTTPException(409, f"git pull 失败：{(pull.stderr or pull.stdout or '')[:200]}")
+        pip = install_requirements()
+        if pip.returncode != 0:
+            raise HTTPException(409, f"依赖安装失败（已停止更新，服务端仍运行旧版）：{(pip.stderr or pip.stdout or '')[:200]}")
+        perform_restart()
+        return {"updating": True, "detail": (pull.stdout or "").strip()[-200:]}
 
     @app.post("/api/edit")
     async def edit_images(
