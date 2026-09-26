@@ -2,6 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的格式，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.2.0] - 2026-09-26
+
+### 新增
+
+- **网页自动更新**：页面每 5 分钟轮询一次 `/api/meta` 版本号（切回标签页时也立即查一次），服务端升级后开着的页面弹「服务端已更新 → 刷新」提示，点击即换到新版；前端静态文件本就带 `no-cache` + ETag 条件请求，正常刷新即得新版，无需强刷
+- DEPLOY.md 新增「自动更新」章节：裸机 systemd timer 定时 git 更新、Docker 定时重建、GitHub Actions 推 tag 即部署三套方案
+
 ## [1.1.1] - 2026-09-26
 
 全功能 E2E 探索（真实浏览器驱动）发现的四个交互层缺陷修复，全部附回归测试。

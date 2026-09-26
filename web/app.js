@@ -921,6 +921,31 @@ async function onProfileSubmit(e) {
   }
 }
 
+/* ---------- 版本轮询：服务端升级后，开着的页面自己发现并提示刷新 ---------- */
+
+let updatePromptShown = false;
+
+async function checkForUpdate() {
+  if (updatePromptShown || !META.version) return;
+  try {
+    const m = await api("/api/meta");
+    if (m.version && m.version !== META.version) {
+      updatePromptShown = true; // 每次页面加载只提示一次；不点也行，下次刷新自然拿到新版
+      toast(`服务端已更新到 v${m.version}`, "info", {
+        label: "刷新",
+        onClick: () => location.reload(),
+      });
+    }
+  } catch (e) {
+    /* 服务端重启中 / 暂不可达：下个周期再看 */
+  }
+}
+
+function watchVersion() {
+  setInterval(checkForUpdate, 5 * 60 * 1000);
+  window.addEventListener("focus", checkForUpdate); // 切回标签页时立即查一次
+}
+
 /* ---------- wiring ---------- */
 
 async function init() {
@@ -932,6 +957,7 @@ async function init() {
   try {
     await loadMeta();
     renderProfiles();
+    watchVersion();
     await loadHistory();
     refreshProjectDatalist();
   } catch (e) {

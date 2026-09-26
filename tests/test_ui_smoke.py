@@ -422,5 +422,67 @@ class TokenModeUITest(unittest.TestCase):
         self.assertIsNone(page.evaluate("localStorage.getItem('imagegen-token')"))
 
 
+class UpdatePromptUITest(unittest.TestCase):
+    """版本轮询：服务端升级后，开着的页面弹「刷新」提示，点击后换到新版（v1.2.0 回归）。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        try:
+            cls._pw = sync_playwright().start()
+            cls.browser = cls._pw.chromium.launch(headless=True)
+        except Exception as exc:
+            raise unittest.SkipTest(f"playwright 浏览器不可用：{exc}")
+        # 类清理按 LIFO 执行：先注册 pw.stop（最后执行），browser.close 才能先跑
+        cls.addClassCleanup(cls._pw.stop)
+        cls.addClassCleanup(cls.browser.close)
+
+        cls.tmpdir = Path(tempfile.mkdtemp(prefix="imagegen-ui-update-")).resolve()
+        cls.addClassCleanup(shutil.rmtree, cls.tmpdir, ignore_errors=True)
+        profiles_path = cls.tmpdir / "profiles.json"
+        profiles_path.write_text(
+            json.dumps({
+                "profiles": [{"name": "test", "base_url": "https://gateway.example/v1", "api_key": SECRET_KEY}],
+                "active": "test",
+            }),
+            encoding="utf-8",
+        )
+        cls._original_version = server_module.APP_VERSION
+        cls.addClassCleanup(cls._restore_version)
+        app = server_module.create_app(
+            library_root=cls.tmpdir / "library", profiles_path=profiles_path
+        )
+        cls.http = _UvicornThread(app)
+        cls.http.__enter__()
+        cls.addClassCleanup(cls.http.__exit__, None, None, None)
+
+    @classmethod
+    def _restore_version(cls) -> None:
+        server_module.APP_VERSION = cls._original_version
+
+    def setUp(self) -> None:
+        context = self.browser.new_context()
+        self.addCleanup(context.close)
+        self.page = context.new_page()
+
+    def test_update_prompt_and_reload_picks_new_version(self) -> None:
+        page = self.page
+        page.goto(self.http.base_url)
+        page.wait_for_load_state("networkidle")
+        self.assertEqual(
+            page.locator("#app-version").inner_text(), f"v{server_module.APP_VERSION}"
+        )
+        # 模拟服务端升级：运行中的服务把版本号换成 9.9.9
+        server_module.APP_VERSION = "9.9.9"
+        try:
+            page.evaluate("window.dispatchEvent(new Event('focus'))")  # 触发一次立即检查
+            page.wait_for_selector('.toast:has-text("服务端已更新")', timeout=8_000)
+            page.locator(".toast-action", has_text="刷新").click()
+            page.wait_for_load_state("networkidle")
+            page.wait_for_selector("#app-version")
+            self.assertEqual(page.locator("#app-version").inner_text(), "v9.9.9")
+        finally:
+            server_module.APP_VERSION = self._original_version
+
+
 if __name__ == "__main__":
     unittest.main()

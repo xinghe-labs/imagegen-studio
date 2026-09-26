@@ -132,3 +132,87 @@ IMAGE_GEN_LIBRARY=/var/lib/imagegen \
 - [ ] profiles 文件权限收紧：`chmod 600 ~/.codex/imagegen-profiles.json`（users 文件同样 `chmod 600`）
 - [ ] 服务器出网能到你的网关即可，不要把 8642 端口直接暴露公网
 - [ ] key 永远只存在服务端 profiles 文件；任何 API 响应都不含它
+
+## 7. 自动更新（可选）
+
+### 网页侧：已内置，无需配置
+
+- 三个前端文件（index.html / app.js / style.css）响应带 `Cache-Control: no-cache` + ETag——浏览器每次打开页面都会做条件请求，服务端更新后**正常刷新即得新版**，无需强刷清缓存；
+- 页面打开期间每 5 分钟轮询一次 `/api/meta` 的版本号（切回标签页时也会立即查一次）：服务端升级后，已打开的页面会弹「服务端已更新到 vX.Y.Z → 刷新」提示，点一下就切到新版。
+
+也就是说：服务器代码换成新版并重启后，什么都不用通知用户——他们最多 5 分钟内（或下次切回页面时）收到提示，点「刷新」即完成更新。
+
+### 方案 A：裸机 / systemd——定时 git 更新
+
+`/opt/imagegen/update.sh`（假设仓库在 /opt/imagegen，服务名 imagegen）：
+
+```bash
+#!/usr/bin/env bash
+set -e
+cd /opt/imagegen
+git fetch origin
+if git diff --quiet main origin/main; then exit 0; fi   # 没有新提交就退出
+git pull --ff-only origin main
+pip install -r requirements.txt --quiet
+systemctl restart imagegen
+```
+
+配 systemd timer 每天检查一次：
+
+```ini
+# /etc/systemd/system/imagegen-update.service
+[Unit]
+Description=imagegen studio auto update
+[Service]
+Type=oneshot
+ExecStart=/opt/imagegen/update.sh
+```
+
+```ini
+# /etc/systemd/system/imagegen-update.timer
+[Unit]
+Description=imagegen studio daily update check
+[Timer]
+OnCalendar=*-*-* 04:20:00
+Persistent=true
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+chmod +x /opt/imagegen/update.sh
+systemctl enable --now imagegen-update.timer
+```
+
+### 方案 B：Docker——定时重建
+
+引擎是挂载的，更新即拉代码重建镜像：
+
+```bash
+crontab -e
+# 每天凌晨拉一次代码并重建（有更新才会实际替换容器）
+20 4 * * * cd /opt/imagegen && git pull --ff-only --quiet && docker compose up -d --build
+```
+
+走 registry 部署的话也可以用 [watchtower](https://containrrr.dev/watchtower/) 自动拉新镜像。
+
+### 方案 C：GitHub Actions——推 tag 即部署
+
+服务器装好 deploy key 后，在仓库加一个 workflow，tag 推送时 SSH 上去执行 update.sh：
+
+```yaml
+# .github/workflows/deploy.yml
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: cd /opt/imagegen && bash update.sh
+```
