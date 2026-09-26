@@ -154,6 +154,39 @@ header {
 }
 .user-result .btn-small { margin-right: 8px; }
 
+/* ---------- 登录 / 兑换码激活页 ---------- */
+
+body.auth-needed header,
+body.auth-needed main,
+body.auth-needed #cred-hint,
+body.auth-needed #auth-hint { display: none; }
+
+#login-view { min-height: 92vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.login-card {
+  width: 380px; max-width: 100%; padding: 30px 30px 22px;
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: 18px;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.5);
+}
+.login-brand { font-size: 23px; font-weight: 700; margin-bottom: 20px; }
+.login-brand em { font-style: normal; color: var(--accent); font-weight: 500; }
+.login-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.login-tab {
+  flex: 1; padding: 9px 0; background: none; border: 1px solid var(--border);
+  color: var(--muted); border-radius: 10px; cursor: pointer; font-size: 14px;
+}
+.login-tab:hover { color: var(--text); }
+.login-tab.on { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.login-pane .field { display: block; margin-bottom: 12px; }
+.login-pane .field input { width: 100%; }
+.login-go {
+  width: 100%; margin: 4px 0 10px; padding: 10px 0;
+  background: var(--accent); color: #0a0e13; border: none; border-radius: 10px;
+  font-size: 14.5px; font-weight: 600; cursor: pointer;
+}
+.login-go:hover { filter: brightness(1.1); }
+.login-go:disabled { opacity: 0.6; cursor: wait; }
+.login-foot { text-align: center; color: var(--muted); font-size: 12.5px; margin: 12px 0 0; }
+
 .header-info { display: flex; align-items: center; gap: 14px; min-width: 0; }
 #profile-select { min-width: 160px; max-width: 320px; }
 #profile-select:disabled { opacity: 0.7; cursor: default; }

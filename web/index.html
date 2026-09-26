@@ -34,15 +34,28 @@
 
 <div id="cred-hint" class="cred-hint hidden">还没有配置任何网关凭据——先在右上角添加一个 profile（名称 + API key + base URL），才能生成图片。</div>
 <div id="auth-hint" class="cred-hint hidden"></div>
-<div id="invite-box" class="cred-hint hidden">
-  <b>用邀请码激活访问</b>
-  <div class="field-row">
-    <label class="field">邀请码<input id="invite-code" placeholder="如 AB12CD34"></label>
-    <label class="field">用户名<input id="invite-name" placeholder="字母/数字/连字符"></label>
-    <button id="invite-activate" type="button" class="btn-small">激活并进入</button>
+<section id="login-view" class="hidden">
+  <div class="login-card">
+    <div class="login-brand">imagegen<span class="brand-dot">·</span><em>studio</em></div>
+    <div class="login-tabs">
+      <button type="button" class="login-tab on" data-login-tab="invite">兑换码激活</button>
+      <button type="button" class="login-tab" data-login-tab="token">访问口令</button>
+    </div>
+    <div id="login-invite" class="login-pane">
+      <label class="field">兑换码<input id="login-invite-code" placeholder="管理员发你的 8 位码" autocomplete="off"></label>
+      <label class="field">用户名<input id="login-invite-name" placeholder="给自己起个名字（字母/数字）" autocomplete="off"></label>
+      <button id="login-activate" type="button" class="login-go">兑换进入</button>
+      <p class="muted">激活后自动创建你的专属图库，凭证只存在本浏览器。</p>
+    </div>
+    <div id="login-token" class="login-pane hidden">
+      <label class="field">访问口令<input id="login-token-input" type="password" placeholder="管理员发你的口令"></label>
+      <button id="login-token-go" type="button" class="login-go">进入</button>
+      <p class="muted">已有账号的旧用户和管理员从这里进。</p>
+    </div>
+    <p id="login-msg" class="muted"></p>
+    <p class="login-foot">没有兑换码？找管理员要一个</p>
   </div>
-  <p id="invite-msg" class="muted">激活后你的访问令牌只存在本浏览器。</p>
-</div>
+</section>
 
 <main class="workbench">
   <section id="generator" class="panel">

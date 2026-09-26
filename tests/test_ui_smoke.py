@@ -406,22 +406,27 @@ class TokenModeUITest(unittest.TestCase):
         self.page = context.new_page()
 
     def test_token_save_and_clear_roundtrip_on_first_visit(self) -> None:
+        """回归 v1.6.0：未认证时显示登录页（兑换码/口令两个入口），口令登录后可清除。"""
         page = self.page
         page.goto(self.http.base_url)
-        page.wait_for_load_state("networkidle")
-        self.assertTrue(page.locator("#auth-hint").is_visible(), "无令牌应显示认证提示")
-        page.locator("summary", has_text="网关配置").click()
-        page.fill("#token-input", TOKEN_VALUE)
-        page.click("#token-save")  # 保存并重载
+        page.wait_for_selector("#login-view:not(.hidden)")
+        self.assertTrue(page.locator("main").is_hidden(), "未认证时工作台应让位给登录页")
+        # 默认停在兑换码 tab
+        self.assertIn("on", page.locator('.login-tab[data-login-tab="invite"]').get_attribute("class"))
+        # 老用户/管理员走口令 tab
+        page.click('.login-tab[data-login-tab="token"]')
+        page.fill("#login-token-input", TOKEN_VALUE)
+        page.click("#login-token-go")
         page.wait_for_load_state("networkidle")
         self.assertEqual(page.evaluate("localStorage.getItem('imagegen-token')"), TOKEN_VALUE)
-        self.assertTrue(page.locator("#auth-hint").is_hidden(), "带令牌后认证提示应消失")
+        self.assertTrue(page.locator("#auth-hint").is_hidden())
         self.assertIn("✓key", page.locator("#profile-select").inner_text())
-        # 清除令牌：此时 init 已成功、按钮事件已绑定
+        # 清除令牌：回到登录页
         page.locator("summary", has_text="网关配置").click()
         page.click("#token-clear")
         page.wait_for_load_state("networkidle")
         self.assertIsNone(page.evaluate("localStorage.getItem('imagegen-token')"))
+        page.wait_for_selector("#login-view:not(.hidden)")
 
     def test_invite_link_copies_current_token(self) -> None:
         """回归 v1.4.2：单令牌模式下「复制邀请链接」用当前令牌拼出可登录的链接。"""
@@ -675,15 +680,21 @@ class UsersAdminUITest(unittest.TestCase):
         code = page.locator("#invites-list .user-row").first.get_attribute("data-code")
         self.assertRegex(code, r"^[A-Z0-9]{8}$")
 
-        # 新人：全新浏览器环境，用邀请链接自助激活
+        # 新人：全新浏览器环境，用兑换码链接进入登录页激活
         newbie = self.browser.new_context().new_page()
         newbie.goto(f"{self.http.base_url}?invite={code}")
-        newbie.wait_for_load_state("networkidle")
-        newbie.wait_for_selector("#invite-box:not(.hidden)")
-        self.assertEqual(newbie.input_value("#invite-code"), code)
+        newbie.wait_for_selector("#login-view:not(.hidden)")
+        self.assertEqual(newbie.input_value("#login-invite-code"), code)
         self.assertNotIn("invite=", newbie.url, "invite 参数应在加载后从地址栏剥离")
-        newbie.fill("#invite-name", "dave")
-        newbie.click("#invite-activate")
+        # 先试一个错误兑换码 → 页面内可见报错
+        newbie.fill("#login-invite-code", "WRONGCOD")
+        newbie.fill("#login-invite-name", "dave")
+        newbie.click("#login-activate")
+        newbie.wait_for_timeout(600)
+        self.assertIn("邀请码", newbie.locator("#login-msg").inner_text())
+        # 换回正确码 → 激活并自动登录
+        newbie.fill("#login-invite-code", code)
+        newbie.click("#login-activate")
         newbie.wait_for_load_state("networkidle")
         self.assertTrue(newbie.locator("#profile-select").is_visible(), "激活后应自动登录")
         newbie.close()

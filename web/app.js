@@ -47,12 +47,35 @@ async function api(path, options) {
   return res.json();
 }
 
-// 令牌缺失/失效时：页面本身仍能打开（静态资源免认证），这里给出修复入口
+// 令牌缺失/失效时：工作台让位给登录/激活页，兑换码和口令都在那里
 function showAuthHint(detail) {
   const hint = $("auth-hint");
-  if (!hint) return;
-  hint.classList.remove("hidden");
-  hint.textContent = `需要访问令牌（${detail || "401"}）——请在下方「网关配置」里填入令牌后保存。`;
+  if (hint) {
+    hint.classList.remove("hidden");
+    hint.textContent = `需要访问凭证（${detail || "401"}）。`;
+  }
+  showLoginView(detail);
+}
+
+function showLoginView(detail) {
+  document.body.classList.add("auth-needed");
+  const view = $("login-view");
+  if (!view) return;
+  view.classList.remove("hidden");
+  setLoginTab("invite");
+  if (INVITE_CODE) $("login-invite-code").value = INVITE_CODE;
+  if (detail && detail !== "unauthorized") {
+    $("login-msg").textContent = `需要访问凭证：${detail}`;
+  }
+}
+
+function setLoginTab(tab) {
+  for (const t of document.querySelectorAll(".login-tab")) {
+    t.classList.toggle("on", t.dataset.loginTab === tab);
+  }
+  $("login-invite").classList.toggle("hidden", tab !== "invite");
+  $("login-token").classList.toggle("hidden", tab !== "token");
+  $("login-msg").textContent = "";
 }
 
 function toast(message, type = "info", action = null) {
@@ -1243,20 +1266,18 @@ function setupInviteFlow() {
     const rest = params.toString();
     history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
   } catch (e) {
-    return;
+    /* ignore */
   }
-  const box = $("invite-box");
-  if (!box) return;
-  box.classList.remove("hidden");
-  $("invite-code").value = INVITE_CODE;
-  if (AUTH_TOKEN) $("invite-msg").textContent = "激活后将替换你当前浏览器里的令牌。";
 }
 
-async function activateInvite() {
-  const code = ($("invite-code").value || "").trim().toUpperCase();
-  const name = ($("invite-name").value || "").trim();
-  if (!code || !name) return;
-  $("invite-activate").disabled = true;
+async function loginActivate() {
+  const code = ($("login-invite-code").value || "").trim().toUpperCase();
+  const name = ($("login-invite-name").value || "").trim();
+  if (!code || !name) {
+    $("login-msg").textContent = "兑换码和用户名都要填。";
+    return;
+  }
+  $("login-activate").disabled = true;
   try {
     const r = await api("/api/register", {
       method: "POST",
@@ -1270,9 +1291,20 @@ async function activateInvite() {
     }
     location.reload();
   } catch (e) {
-    $("invite-activate").disabled = false;
-    $("invite-msg").textContent = e.message;
+    $("login-activate").disabled = false;
+    $("login-msg").textContent = e.message;
   }
+}
+
+function loginWithToken() {
+  const value = ($("login-token-input").value || "").trim();
+  if (!value) return;
+  try {
+    localStorage.setItem("imagegen-token", value);
+  } catch (e) {
+    /* ignore */
+  }
+  location.reload();
 }
 
 /* ---------- wiring ---------- */
@@ -1292,7 +1324,10 @@ async function init() {
     await loadHistory();
     refreshProjectDatalist();
   } catch (e) {
-    toast(`初始化失败：${e.message}`, "error");
+    // 登录页已接管 401 状态时不再重复弹错误提示
+    if (!document.body.classList.contains("auth-needed")) {
+      toast(`初始化失败：${e.message}`, "error");
+    }
   }
 }
 
@@ -1303,7 +1338,11 @@ function bindEvents() {
   $("token-clear").addEventListener("click", clearToken);
   $("token-invite").addEventListener("click", copyInviteLink);
   $("invite-create").addEventListener("click", createInvite);
-  $("invite-activate").addEventListener("click", activateInvite);
+  for (const tab of document.querySelectorAll(".login-tab")) {
+    tab.addEventListener("click", () => setLoginTab(tab.dataset.loginTab));
+  }
+  $("login-activate").addEventListener("click", loginActivate);
+  $("login-token-go").addEventListener("click", loginWithToken);
   $("user-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = $("user-name").value.trim();
