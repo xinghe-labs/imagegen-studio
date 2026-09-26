@@ -1028,5 +1028,95 @@ class SelfUpdateApiTest(unittest.TestCase):
         self.assertEqual(data["current"], server_module.APP_VERSION)
 
 
+class InvitesApiTest(unittest.TestCase):
+    """邀请码分发：管理员生成、朋友自助注册激活。"""
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="imagegen-invite-")).resolve()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.users_file = self.tmpdir / "users.json"
+        self.users_file.write_text(json.dumps({
+            "users": [{"name": "alice", "token": "tok-alice", "admin": True}],
+        }), encoding="utf-8")
+        app = server_module.create_app(
+            library_root=self.tmpdir / "lib", profiles_path=self.tmpdir / "profiles-absent.json",
+            users_path=self.users_file,
+        )
+        self.client = TestClient(app)
+
+    def create_invite(self, **payload) -> dict:
+        response = self.client.post("/api/invites", json=payload or {},
+                                    headers={"X-Auth-Token": "tok-alice"})
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_create_requires_admin_and_persists(self) -> None:
+        self.assertEqual(self.client.post("/api/invites", json={}).status_code, 401)
+        self.assertEqual(self.client.post("/api/invites", json={},
+                                          headers={"X-Auth-Token": "nope"}).status_code, 401)
+        invite = self.create_invite()
+        self.assertRegex(invite["code"], r"^[A-Z0-9]{8}$")
+        self.assertEqual(invite["remaining"], 10)
+        persisted = json.loads(self.users_file.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["invites"][0]["code"], invite["code"])
+
+    def test_register_flow_activates_user(self) -> None:
+        invite = self.create_invite()
+        response = self.client.post("/api/register", json={"code": invite["code"], "name": "carol"})
+        self.assertEqual(response.status_code, 200)
+        token = response.json()["token"]
+        meta = self.client.get("/api/meta", headers={"X-Auth-Token": token}).json()
+        self.assertEqual(meta["user"], "carol")
+        self.assertFalse(meta["is_admin"])
+        # 次数计数 + 持久化
+        listing = self.client.get("/api/invites", headers={"X-Auth-Token": "tok-alice"}).json()
+        self.assertEqual(listing["invites"][0]["used"], 1)
+        persisted = json.loads(self.users_file.read_text(encoding="utf-8"))
+        self.assertIn("carol", [u["name"] for u in persisted["users"]])
+        # 重名 409
+        self.assertEqual(self.client.post("/api/register",
+                                          json={"code": invite["code"], "name": "carol"}).status_code, 409)
+
+    def test_used_up_and_expired_codes_rejected(self) -> None:
+        invite = self.create_invite(max_uses=1)
+        self.client.post("/api/register", json={"code": invite["code"], "name": "carol"})
+        response = self.client.post("/api/register", json={"code": invite["code"], "name": "dave"})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("用完", response.json()["detail"])
+        # 手动把有效期改成过去（模拟过期，文件热加载）
+        data = json.loads(self.users_file.read_text(encoding="utf-8"))
+        data["invites"][0]["expires_at"] = "2020-01-01T00:00:00+08:00"
+        self.users_file.write_text(json.dumps(data), encoding="utf-8")
+        response = self.client.post("/api/register", json={"code": invite["code"], "name": "eve"})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("过期", response.json()["detail"])
+
+    def test_revoke_and_unknown_codes(self) -> None:
+        invite = self.create_invite()
+        code = invite["code"]
+        self.assertEqual(self.client.delete(f"/api/invites/{code}",
+                                            headers={"X-Auth-Token": "tok-alice"}).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/invite/{code}").status_code, 404)
+        self.assertEqual(self.client.post("/api/register",
+                                          json={"code": code, "name": "carol"}).status_code, 403)
+        self.assertEqual(self.client.get("/api/invite/ZZZZZZZZ").status_code, 404)
+
+    def test_register_requires_users_mode(self) -> None:
+        app = server_module.create_app(
+            library_root=self.tmpdir / "l2", profiles_path=self.tmpdir / "profiles-absent.json",
+            token="tok-admin",
+        )
+        client = TestClient(app)
+        response = client.post("/api/register", json={"code": "ABCD1234", "name": "carol"})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("多用户", response.json()["detail"])
+
+    def test_invite_info_public_no_auth(self) -> None:
+        invite = self.create_invite()
+        response = self.client.get(f"/api/invite/{invite['code']}")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["valid"])
+
+
 if __name__ == "__main__":
     unittest.main()

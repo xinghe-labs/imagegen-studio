@@ -34,6 +34,15 @@
 
 <div id="cred-hint" class="cred-hint hidden">还没有配置任何网关凭据——先在右上角添加一个 profile（名称 + API key + base URL），才能生成图片。</div>
 <div id="auth-hint" class="cred-hint hidden"></div>
+<div id="invite-box" class="cred-hint hidden">
+  <b>用邀请码激活访问</b>
+  <div class="field-row">
+    <label class="field">邀请码<input id="invite-code" placeholder="如 AB12CD34"></label>
+    <label class="field">用户名<input id="invite-name" placeholder="字母/数字/连字符"></label>
+    <button id="invite-activate" type="button" class="btn-small">激活并进入</button>
+  </div>
+  <p id="invite-msg" class="muted">激活后你的访问令牌只存在本浏览器。</p>
+</div>
 
 <main class="workbench">
   <section id="generator" class="panel">
@@ -123,6 +132,12 @@
           <button type="submit" class="btn-small">添加用户</button>
         </form>
         <div id="user-result" class="user-result hidden"></div>
+        <div class="gen-group-head"><span class="gen-group-label">邀请码分发</span></div>
+        <div id="invites-list"></div>
+        <div class="field-row">
+          <button id="invite-create" type="button" class="btn-small">生成邀请码（限 10 次 · 7 天有效）</button>
+        </div>
+        <p class="muted">把邀请码或 /?invite=码 链接发到群里，对方自己激活；过期或用完自动失效。命令行等价：<code>add_user.py invite</code></p>
         <p class="muted">换发令牌后旧令牌立即失效；移除用户不动其图库文件。命令行等价：<code>add_user.py</code></p>
       </div>
     </details>

@@ -27,7 +27,7 @@ import threading
 import time
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +59,7 @@ def resolve_cli() -> Path:
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 SIDECAR_RECORD_TYPES = {"image-gen-sidecar", "image-generation-sidecar"}
 DEFAULT_PORT = 8642
-APP_VERSION = "1.4.3"
+APP_VERSION = "1.5.0"
 
 
 def default_library() -> Path:
@@ -585,6 +585,16 @@ class UserCreateRequest(BaseModel):
     library: str | None = None
 
 
+class InviteCreateRequest(BaseModel):
+    max_uses: int = Field(default=10, ge=1, le=500)
+    hours: int = Field(default=168, ge=1, le=8760)
+
+
+class RegisterRequest(BaseModel):
+    code: str = Field(min_length=4, max_length=32)
+    name: str = Field(min_length=1, max_length=32)
+
+
 class PathRequest(BaseModel):
     image: str
 
@@ -717,7 +727,10 @@ def create_app(
         # 只保护 /api/*：静态页面（index/app.js/style.css）不含任何密钥，
         # 让页面永远能打开，令牌没配/配错时由界面提示并可当场修改——
         # 否则输错令牌重载后只会看到一页 401，UI 再也进不去（还得跟限流赛跑）。
-        if (users_state["by_token"] or auth_token) and request.url.path.startswith("/api/"):
+        # /api/register 与 /api/invite/* 是邀请码自助激活入口，公开（自带限流）。
+        public_paths = ("/api/register", "/api/invite/")
+        if (users_state["by_token"] or auth_token) and request.url.path.startswith("/api/") \
+                and not request.url.path.startswith(public_paths):
             ip = request.client.host if request.client else "?"
             provided = request.headers.get("X-Auth-Token") or request.query_params.get("token")
             if auth_locked(ip):
@@ -1095,6 +1108,98 @@ def create_app(
             raise HTTPException(404, f"用户不存在: {name}")
         save_users_file(remaining)
         return {"removed": name}
+
+    # ---------- 邀请码分发：管理员生成短期限次码，朋友自助激活注册 ----------
+
+    INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # 去掉易混淆的 I L O 0 1
+
+    def load_invites() -> list[dict[str, Any]]:
+        return load_json_file(users_file, {"users": [], "invites": []}).get("invites", []) or []
+
+    def save_invites(invites: list[dict[str, Any]]) -> None:
+        data = load_json_file(users_file, {"users": [], "invites": []})
+        data["users"] = load_json_file(users_file, {"users": []}).get("users", [])
+        data["invites"] = invites
+        save_json_file(users_file, data)
+        reload_users_if_changed()
+
+    def new_invite_code() -> str:
+        return "".join(secrets.choice(INVITE_ALPHABET) for _ in range(8))
+
+    def invite_state(invite: dict[str, Any]) -> dict[str, Any]:
+        expired = str(invite.get("expires_at", "")) <= datetime.now().astimezone().isoformat(timespec="seconds")
+        remaining = max(0, int(invite.get("max_uses", 1)) - int(invite.get("used", 0)))
+        valid = (not expired) and remaining > 0
+        return {**invite, "expired": expired, "remaining": remaining, "valid": valid}
+
+    @app.get("/api/invites")
+    async def list_invites(request: Request) -> dict[str, Any]:
+        users_admin_guard(request)
+        return {"invites": [invite_state(i) for i in load_invites()]}
+
+    @app.post("/api/invites")
+    async def create_invite(request: Request, payload: InviteCreateRequest) -> dict[str, Any]:
+        users_admin_guard(request)
+        creator = getattr(request.state, "user", None) or "admin"
+        code = new_invite_code()
+        invite = {
+            "code": code,
+            "expires_at": (datetime.now().astimezone() + timedelta(hours=payload.hours)).isoformat(timespec="seconds"),
+            "max_uses": payload.max_uses,
+            "used": 0,
+            "created_by": creator,
+        }
+        invites = load_invites()
+        invites.append(invite)
+        save_invites(invites)
+        return {**invite_state(invite), "link": f"{request.url.scheme}://{request.headers.get('host') or request.url.netloc}/?invite={code}"}
+
+    @app.delete("/api/invites/{code}")
+    async def revoke_invite(code: str, request: Request) -> dict[str, Any]:
+        users_admin_guard(request)
+        invites = load_invites()
+        remaining = [i for i in invites if i.get("code") != code]
+        if len(remaining) == len(invites):
+            raise HTTPException(404, f"邀请码不存在: {code}")
+        save_invites(remaining)
+        return {"revoked": code}
+
+    @app.get("/api/invite/{code}")
+    async def invite_info(code: str) -> dict[str, Any]:
+        if not re.fullmatch(r"[A-Z0-9]{4,32}", code):
+            raise HTTPException(422, "邀请码格式不对")
+        match = next((invite_state(i) for i in load_invites() if i.get("code") == code), None)
+        if match is None:
+            raise HTTPException(404, "邀请码不存在")
+        return {k: match[k] for k in ("code", "valid", "expired", "remaining", "max_uses", "expires_at")}
+
+    @app.post("/api/register")
+    async def register(request: Request, payload: RegisterRequest) -> dict[str, Any]:
+        ip = request.client.host if request.client else "?"
+        if auth_locked(ip):
+            return JSONResponse({"detail": "尝试次数过多，请稍后再试"}, status_code=429)
+        users = load_json_file(users_file, {"users": []}).get("users", [])
+        if not users:
+            raise HTTPException(403, "未启用多用户模式，邀请码不可用")
+        invites = load_invites()
+        invite = next((invite_state(i) for i in invites if i.get("code") == payload.code.upper()), None)
+        if invite is None or not invite["valid"]:
+            auth_failed(ip)
+            reason = "邀请码已过期" if invite and invite["expired"] else ("邀请码次数已用完" if invite else "邀请码无效")
+            raise HTTPException(403, reason)
+        if not USER_NAME_RE.fullmatch(payload.name):
+            raise HTTPException(422, "用户名限 1-32 位字母/数字/下划线/连字符")
+        if any(u.get("name") == payload.name for u in users):
+            raise HTTPException(409, f"用户名已被占用: {payload.name}")
+        token = secrets.token_urlsafe(24)
+        users.append({"name": payload.name, "token": token})
+        invite["used"] = int(invite.get("used", 0)) + 1
+        data = load_json_file(users_file, {"users": [], "invites": []})
+        data["users"] = users
+        data["invites"] = [i if i.get("code") != payload.code.upper() else {**i, "used": invite["used"]} for i in invites]
+        save_json_file(users_file, data)
+        reload_users_if_changed()
+        return {"name": payload.name, "token": token, "library": f"<图库>/{payload.name}"}
 
     # ---------- 服务端自助更新（git 部署；Docker 请用定时重建） ----------
 

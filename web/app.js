@@ -1049,6 +1049,7 @@ async function renderUsers() {
   } catch (e) {
     list.innerHTML = `<p class="muted">用户列表加载失败：${esc(e.message)}</p>`;
   }
+  await renderInvites();
 }
 
 async function onUserAction(btn) {
@@ -1176,12 +1177,111 @@ async function selfUpdateServer() {
   }
 }
 
+async function renderInvites() {
+  const list = $("invites-list");
+  if (!list || !META.is_admin) return;
+  try {
+    const data = await api("/api/invites");
+    list.innerHTML = data.invites.length
+      ? data.invites.map((i) => `
+        <div class="user-row" data-code="${esc(i.code)}">
+          <span class="user-name">邀请码 <code>${esc(i.code)}</code></span>
+          <span class="muted">${i.valid ? `可用 · 剩余 ${i.remaining}/${i.max_uses}` : i.expired ? "已过期" : "次数用完"} · 截止 ${esc(String(i.expires_at || "").slice(0, 16).replace("T", " "))}</span>
+          <span class="user-actions">
+            <button type="button" data-act="copy-invite" data-code="${esc(i.code)}">复制链接</button>
+            <button type="button" data-act="revoke-invite" data-code="${esc(i.code)}">撤销</button>
+          </span>
+        </div>`).join("")
+      : '<p class="muted">还没有邀请码——生成一个发到群里，朋友自己激活注册。</p>';
+    for (const btn of list.querySelectorAll("button[data-act]")) {
+      btn.addEventListener("click", async () => {
+        const code = btn.dataset.code;
+        try {
+          if (btn.dataset.act === "copy-invite") {
+            await copyText(`${location.origin}/?invite=${code}`, "邀请链接");
+          } else {
+            if (!window.confirm(`撤销邀请码 ${code}？已激活的用户不受影响。`)) return;
+            await api(`/api/invites/${encodeURIComponent(code)}`, { method: "DELETE" });
+            toast("已撤销", "success");
+            await renderInvites();
+          }
+        } catch (e) {
+          toast(e.message, "error");
+        }
+      });
+    }
+  } catch (e) {
+    list.innerHTML = `<p class="muted">邀请码加载失败：${esc(e.message)}</p>`;
+  }
+}
+
+async function createInvite() {
+  try {
+    const r = await api("/api/invites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    await renderInvites();
+    await copyText(`${location.origin}/?invite=${r.code}`, "邀请链接");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+/* ---------- 邀请码激活（?invite=CODE 进来的新用户） ---------- */
+
+let INVITE_CODE = ""; // 从 ?invite= 带进来的激活码
+
+function setupInviteFlow() {
+  try {
+    const params = new URLSearchParams(location.search);
+    const code = (params.get("invite") || "").trim().toUpperCase();
+    if (!code) return;
+    INVITE_CODE = code;
+    params.delete("invite");
+    const rest = params.toString();
+    history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
+  } catch (e) {
+    return;
+  }
+  const box = $("invite-box");
+  if (!box) return;
+  box.classList.remove("hidden");
+  $("invite-code").value = INVITE_CODE;
+  if (AUTH_TOKEN) $("invite-msg").textContent = "激活后将替换你当前浏览器里的令牌。";
+}
+
+async function activateInvite() {
+  const code = ($("invite-code").value || "").trim().toUpperCase();
+  const name = ($("invite-name").value || "").trim();
+  if (!code || !name) return;
+  $("invite-activate").disabled = true;
+  try {
+    const r = await api("/api/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, name }),
+    });
+    try {
+      localStorage.setItem("imagegen-token", r.token);
+    } catch (e) {
+      /* ignore */
+    }
+    location.reload();
+  } catch (e) {
+    $("invite-activate").disabled = false;
+    $("invite-msg").textContent = e.message;
+  }
+}
+
 /* ---------- wiring ---------- */
 
 async function init() {
   // 先绑事件再拉数据：无令牌首访时 loadMeta 会 401，
   // 令牌面板的保存/清除按钮必须已可用，否则认证提示引导的是一条死路
   bindEvents();
+  setupInviteFlow();
   loadDraft();
   renderTokenState();
   try {
@@ -1202,6 +1302,8 @@ function bindEvents() {
   $("token-save").addEventListener("click", saveToken);
   $("token-clear").addEventListener("click", clearToken);
   $("token-invite").addEventListener("click", copyInviteLink);
+  $("invite-create").addEventListener("click", createInvite);
+  $("invite-activate").addEventListener("click", activateInvite);
   $("user-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = $("user-name").value.trim();

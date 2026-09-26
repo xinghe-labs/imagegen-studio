@@ -18,6 +18,7 @@ import json
 import os
 import secrets
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +90,21 @@ def cmd_list(args: argparse.Namespace, path: Path) -> int:
     return 0
 
 
+def cmd_invite(args: argparse.Namespace, path: Path) -> int:
+    data = load_users(path)
+    code = "".join(secrets.choice("ABCDEFGHJKMNPQRSTUVWXYZ23456789") for _ in range(8))
+    expires = (datetime.now().astimezone() + timedelta(hours=args.hours)).isoformat(timespec="seconds")
+    data.setdefault("invites", []).append(
+        {"code": code, "expires_at": expires, "max_uses": args.max_uses, "used": 0}
+    )
+    save_users(path, data)
+    base = args.base_url.rstrip("/") if args.base_url else "http://127.0.0.1:8642"
+    print(f"已生成邀请码: {code}")
+    print(f"  有效期: {args.hours} 小时 / 限 {args.max_uses} 次（过期或用完自动失效）")
+    print(f"  注册链接: {base}/?invite={code}")
+    return 0
+
+
 def cmd_remove(args: argparse.Namespace, path: Path) -> int:
     data = load_users(path)
     users = data["users"]
@@ -117,6 +133,12 @@ def main() -> int:
 
     lst = sub.add_parser("list", help="列出用户")
     lst.set_defaults(func=cmd_list)
+
+    inv = sub.add_parser("invite", help="生成邀请码（对方自助激活注册）")
+    inv.add_argument("--max-uses", type=int, default=10, help="最多激活次数（默认 10）")
+    inv.add_argument("--hours", type=int, default=168, help="有效小时数（默认 168 = 7 天）")
+    inv.add_argument("--base-url", help="打印注册链接用的地址")
+    inv.set_defaults(func=cmd_invite)
 
     rm = sub.add_parser("remove", help="移除用户")
     rm.add_argument("name")

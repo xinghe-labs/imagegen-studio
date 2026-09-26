@@ -664,6 +664,34 @@ class UsersAdminUITest(unittest.TestCase):
         persisted = json.loads(self.users_file.read_text(encoding="utf-8"))
         self.assertEqual([u["name"] for u in persisted["users"]], ["alice"])
 
+    def test_invite_code_distribution_flow(self) -> None:
+        """回归 v1.5.0：管理员生成邀请码 → 新人 ?invite= 自助激活 → 出现在用户列表。"""
+        page = self.page
+        page.goto(f"{self.http.base_url}?token=tok-alice-admin")
+        page.wait_for_load_state("networkidle")
+        page.locator("summary", has_text="网关配置").click()
+        page.click("#invite-create")
+        page.wait_for_selector("#invites-list .user-row", timeout=8_000)
+        code = page.locator("#invites-list .user-row").first.get_attribute("data-code")
+        self.assertRegex(code, r"^[A-Z0-9]{8}$")
+
+        # 新人：全新浏览器环境，用邀请链接自助激活
+        newbie = self.browser.new_context().new_page()
+        newbie.goto(f"{self.http.base_url}?invite={code}")
+        newbie.wait_for_load_state("networkidle")
+        newbie.wait_for_selector("#invite-box:not(.hidden)")
+        self.assertEqual(newbie.input_value("#invite-code"), code)
+        self.assertNotIn("invite=", newbie.url, "invite 参数应在加载后从地址栏剥离")
+        newbie.fill("#invite-name", "dave")
+        newbie.click("#invite-activate")
+        newbie.wait_for_load_state("networkidle")
+        self.assertTrue(newbie.locator("#profile-select").is_visible(), "激活后应自动登录")
+        newbie.close()
+
+        # 管理端重新拉取用户列表，dave 应出现
+        page.evaluate("renderUsers()")
+        page.wait_for_selector('#users-list .user-row[data-name="dave"]', timeout=8_000)
+
 
 if __name__ == "__main__":
     unittest.main()
