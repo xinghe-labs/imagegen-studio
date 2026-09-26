@@ -763,13 +763,13 @@ class SetupAdminUITest(unittest.TestCase):
         # 控制台码 → 创建管理员并自动登录
         page.fill("#setup-code", server_module.SETUP_CODE)
         page.click("#setup-go")
-        page.wait_for_selector("#profile-select", timeout=15_000)
-        meta = page.evaluate("fetch('/api/meta', {headers: {'X-Auth-Token': localStorage.getItem('imagegen-token')}}).then(r => r.json())")
-        self.assertTrue(meta["is_admin"])
-        # 横幅消失（不再是 open 模式），管理区就位
-        self.assertTrue(page.locator("#setup-hint").is_hidden())
+        # 竞态防护：open 模式下工作台一直可见，等「令牌写入」+「横幅消失（重载后 users 模式）」
+        page.wait_for_function("localStorage.getItem('imagegen-token') !== null", timeout=15_000)
+        page.wait_for_selector("#setup-hint", state="hidden", timeout=15_000)
+        page.wait_for_timeout(500)
+        # 横幅已消失说明 meta 已是 users 模式；管理区对管理员可见
         page.locator("summary", has_text="网关配置").click()
-        page.wait_for_selector("#users-admin:not(.hidden)")
+        page.wait_for_selector("#users-admin:not(.hidden)", timeout=10_000)
 
 
 if __name__ == "__main__":
