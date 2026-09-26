@@ -59,7 +59,7 @@ def resolve_cli() -> Path:
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 SIDECAR_RECORD_TYPES = {"image-gen-sidecar", "image-generation-sidecar"}
 DEFAULT_PORT = 8642
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.4.2"
 
 
 def default_library() -> Path:

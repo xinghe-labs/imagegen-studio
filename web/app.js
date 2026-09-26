@@ -549,6 +549,13 @@ function renderTokenState() {
   if (!state) return;
   const has = Boolean(AUTH_TOKEN);
   state.textContent = has ? `当前已设置令牌（${AUTH_TOKEN.slice(0, 6)}…），存于本浏览器` : "当前未设置令牌（本地直连模式）";
+  const invite = $("token-invite");
+  if (invite) invite.classList.toggle("hidden", !has);
+}
+
+function copyInviteLink() {
+  if (!AUTH_TOKEN) return;
+  copyText(`${location.origin}/?token=${AUTH_TOKEN}`, "邀请链接");
 }
 
 function saveToken() {
@@ -1186,6 +1193,7 @@ function bindEvents() {
   $("cancel-job").addEventListener("click", cancelJob);
   $("token-save").addEventListener("click", saveToken);
   $("token-clear").addEventListener("click", clearToken);
+  $("token-invite").addEventListener("click", copyInviteLink);
   $("user-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = $("user-name").value.trim();

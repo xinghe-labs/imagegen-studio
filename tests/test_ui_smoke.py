@@ -401,6 +401,7 @@ class TokenModeUITest(unittest.TestCase):
     def setUp(self) -> None:
         context = self.browser.new_context()
         context.on("dialog", lambda dialog: dialog.accept())
+        context.grant_permissions(["clipboard-read", "clipboard-write"])
         self.addCleanup(context.close)
         self.page = context.new_page()
 
@@ -421,6 +422,18 @@ class TokenModeUITest(unittest.TestCase):
         page.click("#token-clear")
         page.wait_for_load_state("networkidle")
         self.assertIsNone(page.evaluate("localStorage.getItem('imagegen-token')"))
+
+    def test_invite_link_copies_current_token(self) -> None:
+        """回归 v1.4.2：单令牌模式下「复制邀请链接」用当前令牌拼出可登录的链接。"""
+        page = self.page
+        page.goto(f"{self.http.base_url}?token={TOKEN_VALUE}")
+        page.wait_for_load_state("networkidle")
+        page.locator("summary", has_text="网关配置").click()
+        self.assertTrue(page.locator("#token-invite").is_visible())
+        page.click("#token-invite")
+        page.wait_for_selector('.toast:has-text("邀请链接已复制")', timeout=5_000)
+        clipboard = page.evaluate("navigator.clipboard.readText()")
+        self.assertEqual(clipboard, f"{self.http.base_url.rstrip('/')}/?token={TOKEN_VALUE}")
 
     def test_selfupdate_button_flow(self) -> None:
         """回归 v1.4.1：面板检测到 GitHub 新版 → 一键更新服务端（git/pip/重启打桩）。"""

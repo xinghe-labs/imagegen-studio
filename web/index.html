@@ -109,6 +109,7 @@
       <p class="muted">key 只存在本机服务端配置文件里，页面永不回传。</p>
       <div class="field-row">
         <label class="field">访问令牌<input id="token-input" type="password" placeholder="留空 = 不需要令牌" title="服务器开启认证后，管理员发给你的访问口令（形如 ?token=链接里的那串）；粘贴到这里保存，只存本浏览器"></label>
+        <button id="token-invite" type="button" class="btn-small hidden" title="用当前令牌拼出可直接打开的链接，发给对方即可登录">复制邀请链接</button>
         <button id="token-save" type="button" class="btn-small">保存令牌并重载</button>
         <button id="token-clear" type="button" class="btn-small danger">清除令牌</button>
       </div>
