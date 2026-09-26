@@ -1091,15 +1091,18 @@ function showUserResult(title, link) {
 }
 
 let UPSTREAM_VERSION = ""; // GitHub 上的最新 tag
+let UPSTREAM_CHECK = null; // 最近一次上游检查的原始结果（含失败原因）
 
 async function checkUpstream(force) {
   try {
     const m = await api(`/api/version-check${force ? "?force=1" : ""}`);
+    UPSTREAM_CHECK = m;
     UPSTREAM_VERSION = m.ok ? m.latest_upstream || "" : "";
-    renderUpstreamState();
   } catch (e) {
-    /* 离线 / GitHub 不可达：忽略，下次再查 */
+    UPSTREAM_CHECK = { ok: false, detail: e.message };
+    UPSTREAM_VERSION = "";
   }
+  renderUpstreamState();
 }
 
 function renderUpstreamState() {
@@ -1108,9 +1111,11 @@ function renderUpstreamState() {
     UPSTREAM_VERSION && SERVER_VERSION && compareVersions(UPSTREAM_VERSION, SERVER_VERSION) > 0
   );
   if (el) {
-    el.classList.toggle("hidden", !behind);
+    const failed = Boolean(UPSTREAM_CHECK && !UPSTREAM_CHECK.ok);
+    el.classList.toggle("hidden", !behind && !failed);
+    el.classList.toggle("upstream-error", failed && !behind);
+    el.textContent = "";
     if (behind) {
-      el.textContent = "";
       el.append(`GitHub 最新 v${UPSTREAM_VERSION} · `);
       const a = document.createElement("a");
       a.href = "https://github.com/xinghe-labs/imagegen-studio/blob/main/DEPLOY.md";
@@ -1118,6 +1123,9 @@ function renderUpstreamState() {
       a.rel = "noopener";
       a.textContent = "部署文档";
       el.append(a);
+    } else if (failed) {
+      el.title = UPSTREAM_CHECK.detail || "";
+      el.append("GitHub 检查失败（服务器连不上 GitHub？）");
     }
   }
   const btn = $("update-selfupdate");

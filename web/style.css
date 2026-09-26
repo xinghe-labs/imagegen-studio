@@ -112,6 +112,13 @@ header {
 .update-status.ok { color: var(--accent); }
 .update-status.newer { color: var(--amber); }
 .update-status.drift { color: var(--muted); }
+.update-upstream { font-size: 12.5px; color: var(--text); margin-bottom: 10px; }
+.update-upstream a { color: var(--accent); text-decoration: none; }
+.update-upstream a:hover { text-decoration: underline; }
+.update-upstream.upstream-error { color: var(--muted); }
+#update-selfupdate { background: var(--amber); color: #0a0e13; }
+#update-selfupdate:hover { filter: brightness(1.08); }
+#update-selfupdate:disabled { opacity: 0.6; cursor: wait; }
 .update-apply {
   width: 100%; margin-bottom: 8px; padding: 7px 0;
   background: var(--accent); color: #0a0e13; border: none; border-radius: 8px;

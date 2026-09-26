@@ -542,6 +542,9 @@ class UpdatePromptUITest(unittest.TestCase):
         )
         self.assertIn("已是最新", page.locator("#update-status").inner_text())
         self.assertTrue(page.locator("#update-status").is_visible())
+        # 离线打桩下打开面板：上游检查失败要有可见提示（而不是静默无反馈）
+        page.wait_for_selector("#update-upstream:not(.hidden)", timeout=5_000)
+        self.assertIn("GitHub 检查失败", page.locator("#update-upstream").inner_text())
         self.assertFalse(page.locator("#update-apply").is_visible())
         self.assertFalse(page.locator("#update-dot").is_visible())
         # 点面板外部 → 关闭
