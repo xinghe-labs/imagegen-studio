@@ -625,9 +625,10 @@ button.danger:hover { border-color: #f08a8a; background: rgba(240, 138, 138, 0.0
   max-width: 340px;
 }
 .toast.show { opacity: 1; transform: none; }
+/* 容器 pointer-events:none 让 toast 之外的浮层空隙可点；toast 本身（含撤销按钮）必须可点 */
+.toast { display: flex; align-items: center; gap: 10px; pointer-events: auto; }
 .toast-error { border-left-color: var(--danger); }
 .toast-success { border-left-color: var(--accent); }
-.toast { display: flex; align-items: center; gap: 10px; }
 .toast-action {
   flex: 0 0 auto;
   font-size: 12.5px;

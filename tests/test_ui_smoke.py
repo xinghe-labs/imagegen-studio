@@ -217,6 +217,7 @@ class ImagegenUISmokeTest(unittest.TestCase):
         self._js_errors: list[str] = []
         context = self.browser.new_context(accept_downloads=True)
         context.on("pageerror", lambda exc: self._js_errors.append(str(exc)))
+        context.on("dialog", lambda dialog: dialog.accept())  # 删除确认等 window.confirm
         self.addCleanup(self._fail_on_js_errors)
         self.addCleanup(context.close)
         self.page = context.new_page()
@@ -290,6 +291,36 @@ class ImagegenUISmokeTest(unittest.TestCase):
         self.assertEqual(record["prompt"], "深夜食堂的霓虹招牌")
         self.assertEqual(record["model"], "gpt-image-2")
 
+    def test_preset_chip_selects_and_reaches_cli(self) -> None:
+        """回归 v1.1.1：预设 chip 必须能点击选中，并把 preset 传到引擎。"""
+        self.open_app()
+        self.page.click('#preset button[data-v="fast"]')
+        self.assertEqual(
+            self.page.evaluate("document.querySelector('#preset .on')?.dataset.v"), "fast"
+        )
+        self.page.fill("#prompt", "预设传递测试")
+        self.page.click("#generate-btn")
+        self.page.wait_for_selector("#gallery .card", timeout=30_000)
+        sidecar = list(self.library.rglob("*.json"))[0]
+        record = json.loads(sidecar.read_text(encoding="utf-8"))
+        self.assertEqual(record["parameters"]["preset"], "fast")
+
+    def test_undo_toast_restores_deleted_image(self) -> None:
+        """回归 v1.1.1：删除后 toast 里的「撤销」按钮必须可点，且能真正恢复。"""
+        self.seed_image("待删除后撤销的图")
+        self.open_app()
+        self.page.wait_for_selector("#gallery .card")
+        self.page.locator("#gallery .card").first.click()
+        self.page.wait_for_selector("#detail:not(.hidden)")
+        self.page.click("#delete-img")  # confirm 对话框由 handler 自动接受
+        self.page.wait_for_selector('.toast:has-text("撤销")', timeout=8_000)
+        self.assertEqual(self.page.locator("#gallery .card").count(), 0)
+        self.assertTrue(list(self.library.rglob(".trash/**/*.png")), "删除后应进回收站")
+        self.page.locator(".toast-action", has_text="撤销").click()
+        self.page.wait_for_selector("#gallery .card", timeout=8_000)
+        self.assertEqual(self.page.locator("#gallery .card").count(), 1)
+        self.assertFalse(list(self.library.rglob(".trash/**/*.png")), "撤销后回收站应清空")
+
     def test_favorite_batch_select_and_zip(self) -> None:
         self.seed_image("第一张：雨夜便利店")
         self.seed_image("第二张：雪夜电话亭")
@@ -323,6 +354,72 @@ class ImagegenUISmokeTest(unittest.TestCase):
         self.page.wait_for_load_state("networkidle")
         self.assertNotIn(SECRET_KEY, self.page.content())
         self.assertNotIn(SECRET_KEY, self.page.evaluate("JSON.stringify(localStorage)"))
+
+
+TOKEN_VALUE = "e2e-smoke-token-123"
+
+
+@unittest.skipUnless(
+    sync_playwright is not None,
+    "未安装 playwright：pip install playwright && python -m playwright install chromium",
+)
+class TokenModeUITest(unittest.TestCase):
+    """令牌模式首访：认证提示引导的「面板保存令牌」路径必须走通（v1.1.1 回归）。
+
+    回归背景：init() 过去先 await loadMeta()，无令牌时 401 中断，令牌面板按钮
+    的事件从未绑定——提示引导用户走的正是一条死路。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        try:
+            cls._pw = sync_playwright().start()
+            cls.browser = cls._pw.chromium.launch(headless=True)
+        except Exception as exc:
+            raise unittest.SkipTest(f"playwright 浏览器不可用：{exc}")
+        # 类清理按 LIFO 执行：先注册 pw.stop（最后执行），browser.close 才能先跑
+        cls.addClassCleanup(cls._pw.stop)
+        cls.addClassCleanup(cls.browser.close)
+
+        cls.tmpdir = Path(tempfile.mkdtemp(prefix="imagegen-ui-token-")).resolve()
+        cls.addClassCleanup(shutil.rmtree, cls.tmpdir, ignore_errors=True)
+        profiles_path = cls.tmpdir / "profiles.json"
+        profiles_path.write_text(
+            json.dumps({
+                "profiles": [{"name": "test", "base_url": "https://gateway.example/v1", "api_key": SECRET_KEY}],
+                "active": "test",
+            }),
+            encoding="utf-8",
+        )
+        app = server_module.create_app(
+            library_root=cls.tmpdir / "library", profiles_path=profiles_path, token=TOKEN_VALUE
+        )
+        cls.http = _UvicornThread(app)
+        cls.http.__enter__()
+        cls.addClassCleanup(cls.http.__exit__, None, None, None)
+
+    def setUp(self) -> None:
+        context = self.browser.new_context()
+        self.addCleanup(context.close)
+        self.page = context.new_page()
+
+    def test_token_save_and_clear_roundtrip_on_first_visit(self) -> None:
+        page = self.page
+        page.goto(self.http.base_url)
+        page.wait_for_load_state("networkidle")
+        self.assertTrue(page.locator("#auth-hint").is_visible(), "无令牌应显示认证提示")
+        page.locator("summary", has_text="网关配置").click()
+        page.fill("#token-input", TOKEN_VALUE)
+        page.click("#token-save")  # 保存并重载
+        page.wait_for_load_state("networkidle")
+        self.assertEqual(page.evaluate("localStorage.getItem('imagegen-token')"), TOKEN_VALUE)
+        self.assertTrue(page.locator("#auth-hint").is_hidden(), "带令牌后认证提示应消失")
+        self.assertIn("✓key", page.locator("#profile-select").inner_text())
+        # 清除令牌：此时 init 已成功、按钮事件已绑定
+        page.locator("summary", has_text="网关配置").click()
+        page.click("#token-clear")
+        page.wait_for_load_state("networkidle")
+        self.assertIsNone(page.evaluate("localStorage.getItem('imagegen-token')"))
 
 
 if __name__ == "__main__":

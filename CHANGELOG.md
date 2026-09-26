@@ -2,6 +2,26 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的格式，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.1] - 2026-09-26
+
+全功能 E2E 探索（真实浏览器驱动）发现的四个交互层缺陷修复，全部附回归测试。
+
+### 修复
+
+- **预设 chip 无法选中** — `#preset` 的点击监听只保存草稿、从不切换选中态（自 chip UI 引入起即坏）：
+  现在 fast / standard / 透明底可正常点击选中并传给引擎
+- **删除后的「撤销」按钮无法点击** — toast 容器 `pointer-events: none` 未在 toast 上恢复（撤销按钮看得见、点不着）：
+  现在 `.toast` 自身恢复 `pointer-events: auto`，撤销真正可用
+- **令牌模式首访是死路** — `init()` 先 `await loadMeta()`，无令牌时 401 中断，令牌面板的保存/清除按钮事件从未绑定，
+  认证提示引导的路径走不通：现改为先绑定全部事件再拉数据，认证提示引导的流程可走通
+- **backup_library.py 同秒重跑崩溃** — 快照目录名（秒级时间戳）冲突时 `copytree` 抛 FileExistsError：现在自动追加序号
+- 顺手修正：`init().catch` 里 toast 的 `"error"` 级别参数写在了函数调用外，错误提示一直以 info 样式展示
+
+### 测试
+
+- UI 冒烟新增 3 条回归（预设选中并传递、撤销恢复、令牌首访保存/清除）与 `TokenModeUITest`
+- 新增 `tests/test_backup_library.py`（快照完整性、.trash 排除、同秒重跑、保留策略）
+
 ## [1.1.0] - 2026-09-26
 
 自 v1.0.0 以来的 39 个提交，围绕「多人可用、图库可整理、故障可自愈」三个方向。

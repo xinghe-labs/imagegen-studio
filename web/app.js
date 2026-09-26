@@ -924,13 +924,22 @@ async function onProfileSubmit(e) {
 /* ---------- wiring ---------- */
 
 async function init() {
-  await loadMeta();
-  renderProfiles();
-  renderTokenState();
+  // 先绑事件再拉数据：无令牌首访时 loadMeta 会 401，
+  // 令牌面板的保存/清除按钮必须已可用，否则认证提示引导的是一条死路
+  bindEvents();
   loadDraft();
-  await loadHistory();
-  refreshProjectDatalist();
+  renderTokenState();
+  try {
+    await loadMeta();
+    renderProfiles();
+    await loadHistory();
+    refreshProjectDatalist();
+  } catch (e) {
+    toast(`初始化失败：${e.message}`, "error");
+  }
+}
 
+function bindEvents() {
   $("generate-btn").addEventListener("click", onGenerate);
   $("cancel-job").addEventListener("click", cancelJob);
   $("token-save").addEventListener("click", saveToken);
@@ -990,7 +999,12 @@ async function init() {
   for (const el of document.querySelectorAll("#model, #n, #size, #quality, #format, #project")) {
     el.addEventListener("change", saveDraft);
   }
-  document.querySelector("#preset").addEventListener("click", () => setTimeout(saveDraft, 0));
+  $("preset").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-v]");
+    if (!btn) return;
+    for (const b of document.querySelectorAll("#preset button")) b.classList.toggle("on", b === btn);
+    setTimeout(saveDraft, 0);
+  });
   document.querySelector("#ratio").addEventListener("click", () => setTimeout(saveDraft, 0));
   for (const tab of document.querySelectorAll(".tab")) tab.addEventListener("click", () => setTimeout(saveDraft, 0));
   $("open-folder").addEventListener("click", async () => {
@@ -1032,4 +1046,4 @@ async function init() {
   });
 }
 
-init().catch((e) => toast(`初始化失败：${e.message}`), "error");
+init().catch((e) => toast(`初始化失败：${e.message}`, "error"));

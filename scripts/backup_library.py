@@ -50,6 +50,11 @@ def main() -> int:
     dest.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     snapshot = dest / f"imagegen-backup-{stamp}"
+    # 同一秒内重复运行时追加序号，避免快照目录冲突崩溃
+    serial = 2
+    while snapshot.exists():
+        snapshot = dest / f"imagegen-backup-{stamp}-{serial}"
+        serial += 1
     # 跳过回收站（.trash）：那是待清理的删除件，备份它只会让快照虚胖
     shutil.copytree(source, snapshot, ignore=shutil.ignore_patterns(".trash"))
     prune_snapshots(dest, args.days)
