@@ -9,7 +9,24 @@
 </head>
 <body>
 <header>
-  <div class="brand">imagegen<span class="brand-dot">·</span><span class="brand-sub">studio</span><span id="app-version" class="brand-version"></span></div>
+  <div class="brand">
+    imagegen<span class="brand-dot">·</span><span class="brand-sub">studio</span><button id="app-version" class="brand-version" type="button"></button><span id="update-dot" class="update-dot hidden" title="有新版本可用"></span>
+    <div id="update-panel" class="update-panel hidden">
+      <div class="update-head">
+        <span>当前版本</span>
+        <button id="update-check" type="button" title="立即检查更新">↻</button>
+      </div>
+      <div id="update-current" class="update-current"></div>
+      <div id="update-latest" class="update-latest"></div>
+      <div id="update-ok" class="update-ok hidden">✓ 已是最新版本</div>
+      <div id="update-avail" class="update-avail hidden">
+        <span class="update-avail-icon">⬇</span>
+        <span><b>有新版本可用！</b><em id="update-avail-ver"></em></span>
+      </div>
+      <button id="update-apply" class="update-apply hidden" type="button">⬇ 立即更新</button>
+      <a class="update-changelog" href="https://github.com/xinghe-labs/imagegen-studio/blob/main/CHANGELOG.md" target="_blank" rel="noopener">查看更新日志 ⧉</a>
+    </div>
+  </div>
   <div class="header-info">
     <select id="profile-select" title="当前配置"></select>
   </div>

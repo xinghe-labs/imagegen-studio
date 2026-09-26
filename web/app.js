@@ -94,8 +94,13 @@ function toast(message, type = "info", action = null) {
 async function loadMeta() {
   META = await api("/api/meta");
   if (META.version) {
-    if ($("app-version")) $("app-version").textContent = `v${META.version}`;
-    document.title = `imagegen studio v${META.version}`;
+    if (!PAGE_VERSION) PAGE_VERSION = META.version; // 页面资源来自首次加载的那一版
+    SERVER_VERSION = META.version;
+    if ($("app-version")) {
+      $("app-version").textContent = `v${PAGE_VERSION}`;
+      $("app-version").title = `页面 v${PAGE_VERSION} · 服务端 v${SERVER_VERSION} — 点击查看更新`;
+    }
+    document.title = `imagegen studio v${PAGE_VERSION}`;
   }
   if ($("cred-hint")) $("cred-hint").classList.toggle("hidden", Boolean(META.credentials));
   const profileSelect = $("profile-select");
@@ -921,17 +926,52 @@ async function onProfileSubmit(e) {
   }
 }
 
-/* ---------- 版本轮询：服务端升级后，开着的页面自己发现并提示刷新 ---------- */
+/* ---------- 版本与更新面板：服务端升级后，徽章亮橙点、面板可手动检查/一键刷新 ---------- */
 
+const CHANGELOG_URL = "https://github.com/xinghe-labs/imagegen-studio/blob/main/CHANGELOG.md";
+let PAGE_VERSION = ""; // 页面静态资源来自的版本（首次加载时定格）
+let SERVER_VERSION = ""; // 服务端当前运行的版本（轮询/手动检查刷新）
 let updatePromptShown = false;
 
+function compareVersions(a, b) {
+  const pa = String(a).replace(/^v/, "").split(".").map(Number);
+  const pb = String(b).replace(/^v/, "").split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da !== db) return da - db;
+  }
+  return 0;
+}
+
+function renderUpdateState() {
+  const newer = SERVER_VERSION && compareVersions(SERVER_VERSION, PAGE_VERSION) > 0;
+  const differs = Boolean(SERVER_VERSION && PAGE_VERSION && SERVER_VERSION !== PAGE_VERSION);
+  if ($("update-dot")) $("update-dot").classList.toggle("hidden", !newer);
+  if ($("update-current")) $("update-current").textContent = `v${PAGE_VERSION}`;
+  if ($("update-latest")) {
+    $("update-latest").textContent = SERVER_VERSION ? `服务端版本：v${SERVER_VERSION}` : "";
+  }
+  if ($("update-ok")) $("update-ok").classList.toggle("hidden", differs || !SERVER_VERSION);
+  if ($("update-avail")) {
+    $("update-avail").classList.toggle("hidden", !differs);
+    if (differs) {
+      $("update-avail").querySelector("b").textContent = newer ? "有新版本可用！" : "服务端版本已变化";
+      $("update-avail-ver").textContent = `v${SERVER_VERSION}`;
+    }
+  }
+  if ($("update-apply")) $("update-apply").classList.toggle("hidden", !differs);
+}
+
 async function checkForUpdate() {
-  if (updatePromptShown || !META.version) return;
+  if (!META.version) return;
   try {
     const m = await api("/api/meta");
-    if (m.version && m.version !== META.version) {
+    SERVER_VERSION = m.version || SERVER_VERSION;
+    renderUpdateState();
+    if (SERVER_VERSION && PAGE_VERSION && SERVER_VERSION !== PAGE_VERSION && !updatePromptShown) {
       updatePromptShown = true; // 每次页面加载只提示一次；不点也行，下次刷新自然拿到新版
-      toast(`服务端已更新到 v${m.version}`, "info", {
+      toast(`服务端已更新到 v${SERVER_VERSION}`, "info", {
         label: "刷新",
         onClick: () => location.reload(),
       });
@@ -944,6 +984,13 @@ async function checkForUpdate() {
 function watchVersion() {
   setInterval(checkForUpdate, 5 * 60 * 1000);
   window.addEventListener("focus", checkForUpdate); // 切回标签页时立即查一次
+}
+
+function toggleUpdatePanel(force) {
+  const panel = $("update-panel");
+  const show = force !== undefined ? force : panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !show);
+  if (show) renderUpdateState();
 }
 
 /* ---------- wiring ---------- */
@@ -970,6 +1017,25 @@ function bindEvents() {
   $("cancel-job").addEventListener("click", cancelJob);
   $("token-save").addEventListener("click", saveToken);
   $("token-clear").addEventListener("click", clearToken);
+  // 版本徽章与更新面板
+  $("app-version").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleUpdatePanel();
+  });
+  $("update-check").addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const btn = $("update-check");
+    btn.classList.add("spinning");
+    await checkForUpdate();
+    btn.classList.remove("spinning");
+  });
+  $("update-apply").addEventListener("click", () => location.reload());
+  document.addEventListener("click", (e) => {
+    const panel = $("update-panel");
+    if (!panel.classList.contains("hidden") && !panel.contains(e.target)) {
+      panel.classList.add("hidden");
+    }
+  });
   // 输入变化即存草稿（提示词用防抖）
   let draftTimer = null;
   const scheduleDraft = () => {
@@ -1007,6 +1073,10 @@ function bindEvents() {
   document.addEventListener("keydown", (e) => {
     const lightboxOpen = !$("lightbox").classList.contains("hidden");
     if (e.key === "Escape") {
+      if (!$("update-panel").classList.contains("hidden")) {
+        $("update-panel").classList.add("hidden"); // 先关更新面板
+        return;
+      }
       if (lightboxOpen) closeLightbox();
       else closeDetail();
       return;

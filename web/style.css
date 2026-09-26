@@ -69,6 +69,7 @@ header {
 }
 
 .brand {
+  position: relative;
   font-size: 19px;
   font-weight: 700;
   letter-spacing: 0.5px;
@@ -76,7 +77,53 @@ header {
 }
 .brand-sub { color: var(--accent); font-weight: 500; margin-left: 6px; }
 .brand-dot { color: var(--border-strong); margin-left: 6px; }
-.brand-version { color: var(--muted); font-size: 12px; margin-left: 10px; font-weight: 400; }
+.brand-version {
+  color: var(--muted); font-size: 12px; margin-left: 10px; font-weight: 400;
+  background: none; border: none; padding: 3px 6px; border-radius: 6px; cursor: pointer;
+}
+.brand-version:hover { color: var(--text); background: var(--accent-dim); }
+
+/* ---------- 版本更新面板 ---------- */
+
+.update-dot {
+  position: absolute; top: -1px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--amber); box-shadow: 0 0 7px rgba(240, 180, 41, 0.85);
+}
+.update-panel {
+  position: absolute; top: calc(100% + 10px); left: 40px; z-index: 50;
+  width: 236px; padding: 14px 16px; text-align: left;
+  font: 14px/1.5 "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  letter-spacing: normal; font-weight: 400;
+  background: var(--panel-2); border: 1px solid var(--border-strong); border-radius: 12px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
+}
+.update-head { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 13px; }
+.update-head button {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 2px 4px; border-radius: 6px;
+}
+.update-head button:hover { color: var(--text); }
+.update-head button.spinning { animation: update-spin 0.8s linear infinite; }
+@keyframes update-spin { to { transform: rotate(360deg); } }
+.update-current { font-size: 26px; font-weight: 700; margin: 6px 0 2px; color: var(--text); }
+.update-latest { font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
+.update-ok { color: var(--accent); font-size: 13px; margin-bottom: 10px; }
+.update-avail {
+  display: flex; gap: 10px; align-items: center; margin-bottom: 10px; padding: 10px 12px;
+  background: rgba(240, 180, 41, 0.08); border: 1px solid rgba(240, 180, 41, 0.35);
+  border-radius: 9px; color: var(--amber); font-size: 13px;
+}
+.update-avail-icon { font-size: 16px; }
+.update-avail b { display: block; }
+.update-avail em { font-style: normal; display: block; font-size: 12px; color: var(--muted); }
+.update-apply {
+  width: 100%; margin-bottom: 8px; padding: 9px 0;
+  background: var(--accent); color: #0a0e13; border: none; border-radius: 9px;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.update-apply:hover { filter: brightness(1.1); }
+.update-changelog { display: block; text-align: center; color: var(--muted); font-size: 12.5px; text-decoration: none; }
+.update-changelog:hover { color: var(--text); }
 
 .header-info { display: flex; align-items: center; gap: 14px; min-width: 0; }
 #profile-select { min-width: 160px; max-width: 320px; }
