@@ -465,34 +465,35 @@ class UpdatePromptUITest(unittest.TestCase):
         self.page = context.new_page()
 
     def test_update_panel_flow(self) -> None:
-        """回归 v1.3.0：版本徽章下拉面板——已是最新/外点关闭/橙点/立即更新。"""
+        """回归 v1.3.0：版本徽章下拉面板——已是最新/外点关闭/橙点/刷新加载新版。"""
         page = self.page
         page.goto(self.http.base_url)
         page.wait_for_load_state("networkidle")
-        # 同版本：面板显示已是最新，无「立即更新」
+        # 同版本：面板显示已是最新，无刷新按钮
         page.click("#app-version")
         page.wait_for_selector("#update-panel:not(.hidden)")
         self.assertIn(
             f"v{server_module.APP_VERSION}", page.locator("#update-current").inner_text()
         )
-        self.assertTrue(page.locator("#update-ok").is_visible())
+        self.assertIn("已是最新", page.locator("#update-status").inner_text())
+        self.assertTrue(page.locator("#update-status").is_visible())
         self.assertFalse(page.locator("#update-apply").is_visible())
         self.assertFalse(page.locator("#update-dot").is_visible())
         # 点面板外部 → 关闭
         page.mouse.click(640, 400)
         page.wait_for_timeout(250)
         self.assertIn("hidden", page.locator("#update-panel").get_attribute("class"))
-        # 模拟服务端升级 → ↻ 手动检查 → 橙点 + 可用框 + 立即更新
+        # 模拟服务端升级 → ↻ 手动检查 → 橙点 + 有新版提示 + 刷新按钮
         server_module.APP_VERSION = "9.9.9"
         try:
             page.click("#app-version")
             page.click("#update-check")
             page.wait_for_selector("#update-dot:not(.hidden)", timeout=8_000)
-            self.assertTrue(page.locator("#update-avail").is_visible())
-            self.assertIn("有新版本可用", page.locator("#update-avail").inner_text())
+            self.assertIn("服务端有新版", page.locator("#update-status").inner_text())
+            self.assertTrue(page.locator("#update-status").is_visible())
             self.assertIn("v9.9.9", page.locator("#update-latest").inner_text())
             self.assertTrue(page.locator("#update-apply").is_visible())
-            # 立即更新 = 刷新加载新版
+            # 刷新加载新版
             page.click("#update-apply")
             page.wait_for_load_state("networkidle")
             page.wait_for_selector("#app-version")

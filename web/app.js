@@ -950,17 +950,27 @@ function renderUpdateState() {
   if ($("update-dot")) $("update-dot").classList.toggle("hidden", !newer);
   if ($("update-current")) $("update-current").textContent = `v${PAGE_VERSION}`;
   if ($("update-latest")) {
-    $("update-latest").textContent = SERVER_VERSION ? `服务端版本：v${SERVER_VERSION}` : "";
+    $("update-latest").textContent = SERVER_VERSION ? `服务端 v${SERVER_VERSION}` : "";
   }
-  if ($("update-ok")) $("update-ok").classList.toggle("hidden", differs || !SERVER_VERSION);
-  if ($("update-avail")) {
-    $("update-avail").classList.toggle("hidden", !differs);
-    if (differs) {
-      $("update-avail").querySelector("b").textContent = newer ? "有新版本可用！" : "服务端版本已变化";
-      $("update-avail-ver").textContent = `v${SERVER_VERSION}`;
+  const status = $("update-status");
+  if (status) {
+    status.classList.remove("ok", "newer", "drift");
+    status.classList.toggle("hidden", !SERVER_VERSION);
+    if (SERVER_VERSION && !differs) {
+      status.classList.add("ok");
+      status.textContent = "✓ 已是最新";
+    } else if (newer) {
+      status.classList.add("newer");
+      status.textContent = `⬇ 服务端有新版 v${SERVER_VERSION}`;
+    } else if (differs) {
+      status.classList.add("drift");
+      status.textContent = `服务端版本 v${SERVER_VERSION}，低于页面`;
     }
   }
-  if ($("update-apply")) $("update-apply").classList.toggle("hidden", !differs);
+  if ($("update-apply")) {
+    $("update-apply").classList.toggle("hidden", !differs);
+    $("update-apply").textContent = newer ? "刷新加载新版" : "刷新页面对齐版本";
+  }
 }
 
 async function checkForUpdate() {
