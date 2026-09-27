@@ -28,12 +28,45 @@
     </div>
   </div>
   <div class="header-info">
+    <button id="admin-open" type="button" class="btn-small hidden" title="管理中心：邀请码分发与用户管理">⚙ 管理</button>
     <select id="profile-select" title="当前配置"></select>
   </div>
 </header>
 
 <div id="cred-hint" class="cred-hint hidden">还没有配置任何网关凭据——先在右上角添加一个 profile（名称 + API key + base URL），才能生成图片。</div>
 <div id="setup-hint" class="cred-hint hidden">这是全新实例——<a href="#" id="setup-open">初始化管理员账号</a>（初始化码在服务端控制台输出里）。</div>
+<div id="admin-backdrop" class="hidden"></div>
+<div id="admin-dialog" class="hidden">
+  <div class="admin-card">
+    <div class="admin-head">
+      <span class="admin-title">管理中心</span>
+      <button id="admin-close" type="button" title="关闭">✕</button>
+    </div>
+    <div class="admin-tabs">
+      <button type="button" class="login-tab on" data-admin-tab="invites">邀请码分发</button>
+      <button type="button" class="login-tab" data-admin-tab="users">用户与令牌</button>
+    </div>
+    <div id="admin-tab-invites" class="admin-pane">
+      <div id="invites-list"></div>
+      <div class="field-row admin-create">
+        <label class="field">可用次数<input id="invite-uses" type="number" min="1" max="500" value="10"></label>
+        <label class="field">有效天数<input id="invite-hours" type="number" min="1" max="3650" value="7"></label>
+        <button id="invite-create" type="button" class="btn-small">生成邀请码</button>
+      </div>
+      <p class="muted">把链接发到群里，对方自己激活；过期或用完自动失效。命令行等价：<code>add_user.py invite</code></p>
+    </div>
+    <div id="admin-tab-users" class="admin-pane hidden">
+      <div id="users-list"></div>
+      <form id="user-form" class="field-row">
+        <label class="field">用户名<input id="user-name" placeholder="如 alice" required></label>
+        <label class="field">图库目录（可选）<input id="user-library" placeholder="留空 = <图库>/<用户名>"></label>
+        <button type="submit" class="btn-small">添加用户</button>
+      </form>
+      <div id="user-result" class="user-result hidden"></div>
+      <p class="muted">换发令牌后旧令牌立即失效；移除用户不动其图库文件。命令行等价：<code>add_user.py</code></p>
+    </div>
+  </div>
+</div>
 <div id="auth-hint" class="cred-hint hidden"></div>
 <div id="setup-backdrop" class="hidden"></div>
 <div id="setup-dialog" class="hidden">
@@ -147,23 +180,6 @@
         <button id="token-clear" type="button" class="btn-small danger">清除令牌</button>
       </div>
       <p id="token-state" class="muted"></p>
-      <div id="users-admin" class="hidden">
-        <div class="gen-group-head"><span class="gen-group-label">用户与令牌管理</span></div>
-        <div id="users-list"></div>
-        <form id="user-form" class="field-row">
-          <label class="field">用户名<input id="user-name" placeholder="如 alice" required></label>
-          <label class="field">图库目录（可选）<input id="user-library" placeholder="留空 = <图库>/<用户名>"></label>
-          <button type="submit" class="btn-small">添加用户</button>
-        </form>
-        <div id="user-result" class="user-result hidden"></div>
-        <div class="gen-group-head"><span class="gen-group-label">邀请码分发</span></div>
-        <div id="invites-list"></div>
-        <div class="field-row">
-          <button id="invite-create" type="button" class="btn-small">生成邀请码（限 10 次 · 7 天有效）</button>
-        </div>
-        <p class="muted">把邀请码或 /?invite=码 链接发到群里，对方自己激活；过期或用完自动失效。命令行等价：<code>add_user.py invite</code></p>
-        <p class="muted">换发令牌后旧令牌立即失效；移除用户不动其图库文件。命令行等价：<code>add_user.py</code></p>
-      </div>
     </details>
     <div id="latest"></div>
     </div>

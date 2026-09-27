@@ -1048,9 +1048,7 @@ function maskToken(token) {
 }
 
 async function renderUsers() {
-  const wrap = $("users-admin");
-  if (!wrap) return;
-  wrap.classList.toggle("hidden", !META.is_admin);
+  renderAdminEntry();
   if (!META.is_admin) return;
   const list = $("users-list");
   try {
@@ -1241,10 +1239,12 @@ async function renderInvites() {
 
 async function createInvite() {
   try {
+    const uses = Math.max(1, parseInt($("invite-uses")?.value, 10) || 10);
+    const days = Math.max(1, parseInt($("invite-hours")?.value, 10) || 7);
     const r = await api("/api/invites", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ max_uses: uses, hours: days * 24 }),
     });
     await renderInvites();
     await copyText(`${location.origin}/?invite=${r.code}`, "邀请链接");
@@ -1310,6 +1310,35 @@ function loginWithToken() {
     /* ignore */
   }
   location.reload();
+}
+
+/* ---------- 管理中心：邀请码分发 + 用户与令牌（管理员） ---------- */
+
+function renderAdminEntry() {
+  const btn = $("admin-open");
+  if (btn) btn.classList.toggle("hidden", !META.is_admin);
+}
+
+function openAdminDialog() {
+  $("admin-backdrop").classList.remove("hidden");
+  $("admin-dialog").classList.remove("hidden");
+  setAdminTab("invites");
+  renderUsers();
+}
+
+function closeAdminDialog() {
+  $("admin-backdrop").classList.add("hidden");
+  $("admin-dialog").classList.add("hidden");
+}
+
+function setAdminTab(tab) {
+  for (const t of document.querySelectorAll("[data-admin-tab]")) {
+    t.classList.toggle("on", t.dataset.adminTab === tab);
+  }
+  $("admin-tab-invites").classList.toggle("hidden", tab !== "invites");
+  $("admin-tab-users").classList.toggle("hidden", tab !== "users");
+  if (tab === "invites") renderInvites();
+  else renderUsers();
 }
 
 /* ---------- 首次引导：全新实例用控制台码创建管理员 ---------- */
@@ -1396,6 +1425,12 @@ function bindEvents() {
   $("token-clear").addEventListener("click", clearToken);
   $("token-invite").addEventListener("click", copyInviteLink);
   $("invite-create").addEventListener("click", createInvite);
+  $("admin-open").addEventListener("click", openAdminDialog);
+  $("admin-close").addEventListener("click", closeAdminDialog);
+  $("admin-backdrop").addEventListener("click", closeAdminDialog);
+  for (const tab of document.querySelectorAll("[data-admin-tab]")) {
+    tab.addEventListener("click", () => setAdminTab(tab.dataset.adminTab));
+  }
   for (const tab of document.querySelectorAll(".login-tab")) {
     tab.addEventListener("click", () => setLoginTab(tab.dataset.loginTab));
   }
@@ -1483,6 +1518,10 @@ function bindEvents() {
   document.addEventListener("keydown", (e) => {
     const lightboxOpen = !$("lightbox").classList.contains("hidden");
     if (e.key === "Escape") {
+      if (!$("admin-dialog").classList.contains("hidden")) {
+        closeAdminDialog();
+        return;
+      }
       if (!$("setup-dialog").classList.contains("hidden")) {
         closeSetupDialog();
         return;

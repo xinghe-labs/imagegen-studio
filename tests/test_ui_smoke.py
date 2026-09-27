@@ -642,22 +642,22 @@ class UsersAdminUITest(unittest.TestCase):
         page = self.page
         page.goto(f"{self.http.base_url}?token=tok-alice-admin")
         page.wait_for_load_state("networkidle")
-        page.locator("summary", has_text="网关配置").click()
-        admin_section = page.locator("#users-admin")
-        page.wait_for_selector("#users-admin:not(.hidden)")
+        # 头部「⚙ 管理」按钮（仅管理员可见）→ 打开管理中心
+        page.click("#admin-open")
+        page.wait_for_selector("#admin-dialog:not(.hidden)")
         # 添加用户 bob → 出现邀请链接，列表多一行
+        page.click('[data-admin-tab="users"]')
         page.fill("#user-name", "bob")
         page.click('#user-form button[type="submit"]')
         page.wait_for_selector("#user-result:not(.hidden)")
         link = page.locator(".user-result-link").inner_text()
         self.assertIn("/?token=", link)
         page.wait_for_selector('#users-list .user-row[data-name="bob"]')
-        # 非 admin 用户看不到管理区
+        # 非 admin 用户看不到管理入口
         other = self.browser.new_context().new_page()
         other.goto(f"{self.http.base_url}?token={link.split('token=')[1]}")
         other.wait_for_load_state("networkidle")
-        other.locator("summary", has_text="网关配置").click()
-        self.assertTrue(other.locator("#users-admin").get_attribute("class").find("hidden") >= 0)
+        self.assertTrue(other.locator("#admin-open").is_hidden(), "非管理员不应看到管理按钮")
         # bob 的令牌确实可用（meta 正常加载且非管理员）
         self.assertEqual(other.locator("#profile-select").inner_text().find("✓key") >= 0, True)
         other.close()
@@ -674,11 +674,17 @@ class UsersAdminUITest(unittest.TestCase):
         page = self.page
         page.goto(f"{self.http.base_url}?token=tok-alice-admin")
         page.wait_for_load_state("networkidle")
-        page.locator("summary", has_text="网关配置").click()
+        page.click("#admin-open")
+        page.wait_for_selector("#admin-dialog:not(.hidden)")
+        # 自定义参数：限 2 次 · 3 天有效（页面输入 → 服务端生效）
+        page.fill("#invite-uses", "2")
+        page.fill("#invite-hours", "3")
         page.click("#invite-create")
         page.wait_for_selector("#invites-list .user-row", timeout=8_000)
         code = page.locator("#invites-list .user-row").first.get_attribute("data-code")
         self.assertRegex(code, r"^[A-Z0-9]{8}$")
+        page.wait_for_timeout(400)
+        self.assertIn("剩余 2/2", page.locator("#invites-list .user-row").first.inner_text())
 
         # 新人：全新浏览器环境，用兑换码链接进入登录页激活
         newbie = self.browser.new_context().new_page()
@@ -698,8 +704,8 @@ class UsersAdminUITest(unittest.TestCase):
         newbie.wait_for_selector("#profile-select", timeout=15_000)
         newbie.close()
 
-        # 管理端重新拉取用户列表，dave 应出现
-        page.evaluate("renderUsers()")
+        # 管理端切到用户标签重新拉取，dave 应出现（管理中心默认停在邀请码标签）
+        page.evaluate("setAdminTab('users')")
         page.wait_for_selector('#users-list .user-row[data-name="dave"]', timeout=8_000)
 
 
@@ -767,9 +773,10 @@ class SetupAdminUITest(unittest.TestCase):
         page.wait_for_function("localStorage.getItem('imagegen-token') !== null", timeout=15_000)
         page.wait_for_selector("#setup-hint", state="hidden", timeout=15_000)
         page.wait_for_timeout(500)
-        # 横幅已消失说明 meta 已是 users 模式；管理区对管理员可见
-        page.locator("summary", has_text="网关配置").click()
-        page.wait_for_selector("#users-admin:not(.hidden)", timeout=10_000)
+        # 横幅已消失说明 meta 已是 users 模式；头部出现管理入口，打开管理中心
+        page.wait_for_selector("#admin-open:not(.hidden)", timeout=10_000)
+        page.click("#admin-open")
+        page.wait_for_selector("#admin-dialog:not(.hidden)", timeout=10_000)
 
 
 if __name__ == "__main__":

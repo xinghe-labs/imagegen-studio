@@ -187,6 +187,27 @@ body.auth-needed #auth-hint { display: none; }
 .login-go:disabled { opacity: 0.6; cursor: wait; }
 .login-foot { text-align: center; color: var(--muted); font-size: 12.5px; margin: 12px 0 0; }
 
+/* ---------- 管理中心对话框 ---------- */
+
+#admin-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 60; }
+#admin-dialog {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 61;
+  width: 520px; max-width: calc(100vw - 32px); max-height: 86vh; overflow: auto;
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6); padding: 18px 20px;
+}
+.admin-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.admin-title { font-size: 17px; font-weight: 700; }
+#admin-close { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; }
+#admin-close:hover { color: var(--text); }
+.admin-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+.admin-tabs .login-tab { flex: 1; padding: 8px 0; background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 9px; cursor: pointer; font-size: 13.5px; }
+.admin-tabs .login-tab.on { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.admin-pane .field-row { align-items: end; }
+.admin-create .field input { width: 90px; }
+.admin-pane .user-row code { color: var(--accent); }
+#admin-open.hidden { display: none; }
+
 /* ---------- 初始化管理员对话框 ---------- */
 
 #setup-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 70; }
